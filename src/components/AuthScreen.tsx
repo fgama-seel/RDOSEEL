@@ -81,7 +81,7 @@ export const AuthScreen: React.FC = () => {
     } catch (err: any) {
       console.error(err);
       setError(
-        "Falha ao entrar com Google. Se estiver no iFrame do AI Studio, utilize o botão 'Ativar Modo Offline Local' abaixo!"
+        "Falha ao entrar com Google. Se estiver no preview do AI Studio, você precisa abrir o app em uma nova guia (botão no canto superior direito). Se estiver no seu GitHub Pages, certifique-se de adicionar o domínio 'fgama.github.io' em 'Authentication > Settings > Authorized domains' no Console do Firebase."
       );
     } finally {
       setLoading(false);

@@ -871,7 +871,8 @@ export const RdoPrintView: React.FC<RdoPrintViewProps> = ({ report, reportsToPri
 
   const getPrintTitle = () => {
     if (exportMode === "individual" || totalReportsCount === 1) {
-      return currentActiveReport?.rdoNo || "RDO";
+      const rdoNumber = currentActiveReport?.rdoNo || "000";
+      return rdoNumber.toUpperCase().startsWith("RDO") ? rdoNumber : `RDO-${rdoNumber}`;
     }
     return `LOTE_RDO_${totalReportsCount}_relatorios`;
   };
@@ -882,7 +883,7 @@ export const RdoPrintView: React.FC<RdoPrintViewProps> = ({ report, reportsToPri
     window.focus();
     setTimeout(() => {
       window.print();
-      document.title = originalTitle;
+      setTimeout(() => { document.title = originalTitle; }, 1000);
     }, 100);
   };
 
@@ -892,7 +893,7 @@ export const RdoPrintView: React.FC<RdoPrintViewProps> = ({ report, reportsToPri
     window.focus();
     setTimeout(() => {
       window.print();
-      document.title = originalTitle;
+      setTimeout(() => { document.title = originalTitle; }, 1000);
       if (activeIndex < totalReportsCount - 1) {
         setTimeout(() => {
           setActiveIndex(prev => prev + 1);
