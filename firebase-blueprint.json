@@ -1,0 +1,37 @@
+{
+  "entities": {
+    "RdoReport": {
+      "title": "RdoReport",
+      "description": "Daily Work Report containing activity highlights, safety info, weather condition records and labor/equipment metrics.",
+      "type": "object",
+      "properties": {
+        "rdoNumber": { "type": "string", "description": "Form identifier code like BDG-1224" },
+        "date": { "type": "string", "description": "Date of the report" },
+        "projectName": { "type": "string", "description": "Name of the construction project" },
+        "client": { "type": "string", "description": "Client company name" },
+        "manager": { "type": "string", "description": "Responsible manager name" },
+        "contractor": { "type": "string", "description": "Contractor / emitting company" },
+        "durationDays": { "type": "integer", "description": "Total duration in days" },
+        "elapsedDays": { "type": "integer", "description": "Days since starting date" },
+        "remainingDays": { "type": "integer", "description": "Days remaining" },
+        "startDate": { "type": "string", "description": "Start date of project" },
+        "endDate": { "type": "string", "description": "Planned end date of project" },
+        "status": { "type": "string", "description": "Current status of the report (Em Digitação, Enviado para Fiscalização, Finalizado, Assinado, Cancelado)" },
+        "creatorEmail": { "type": "string", "description": "The email of the editor who created the report" },
+        "fiscalizacaoFinalizada": { "type": "boolean", "description": "Whether fiscalizacao has completed comments" },
+        "emitenteAssinado": { "type": "boolean", "description": "Whether the issuer has signed" },
+        "contratanteAssinado": { "type": "boolean", "description": "Whether the contractor/fiscal has signed" },
+        "createdAt": { "type": "string", "description": "Server timestamp of document creation" },
+        "updatedAt": { "type": "string", "description": "Server timestamp of document modification" },
+        "userId": { "type": "string", "description": "Owner userId who created the report" }
+      },
+      "required": ["rdoNumber", "date", "projectName", "userId"]
+    }
+  },
+  "firestore": {
+    "/rdos/{rdoId}": {
+      "schema": "RdoReport",
+      "description": "Represents an RDO report in Firestore"
+    }
+  }
+}
