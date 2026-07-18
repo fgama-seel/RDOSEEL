@@ -12,6 +12,7 @@ import {
   StoppageDetailRow,
   HOURS_LIST
 } from "../types";
+import { compressImage } from "../utils/imageUtils";
 import { useRdoStore } from "../context/RdoContext";
 import { 
   Save, 
@@ -616,17 +617,18 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
     if (files && files.length > 0) {
       const file = files[0];
       const reader = new FileReader();
-      reader.onloadend = () => {
+      reader.onloadend = async () => {
         const base64String = reader.result as string;
+        const compressedBase64 = await compressImage(base64String, 1024, 1024, 0.7);
         const currentImgs = currentReport.atividades[actIdx].imagens || [];
         if (currentImgs.length < 2) {
           handleUpdateActivity(actIdx, {
-            imagens: [...currentImgs, base64String]
+            imagens: [...currentImgs, compressedBase64]
           });
         } else {
           // Overwrite first one
           handleUpdateActivity(actIdx, {
-            imagens: [base64String, currentImgs[1]]
+            imagens: [compressedBase64, currentImgs[1]]
           });
         }
       };
@@ -648,11 +650,12 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
 
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       const reader = new FileReader();
-      reader.onloadend = () => {
+      reader.onloadend = async () => {
         const base64String = reader.result as string;
+        const compressedBase64 = await compressImage(base64String, 1024, 1024, 0.7);
         const currentImgs = currentReport.atividades[actIdx].imagens || [];
         handleUpdateActivity(actIdx, {
-          imagens: [...currentImgs.slice(-1), base64String] // maintain max 2 images
+          imagens: [...currentImgs.slice(-1), compressedBase64] // maintain max 2 images
         });
       };
       reader.readAsDataURL(e.dataTransfer.files[0]);
@@ -1801,12 +1804,16 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
                   const readers = Array.from(files).map((file: any) => {
                     return new Promise<{ id: string, dataUrl: string, name?: string, type?: string }>((resolve) => {
                       const reader = new FileReader();
-                      reader.onloadend = () => resolve({ 
-                        id: "anx-" + Math.random().toString(36).substr(2, 9), 
-                        dataUrl: reader.result as string,
-                        name: file.name,
-                        type: file.type
-                      });
+                      reader.onloadend = async () => {
+                        const dataUrl = reader.result as string;
+                        const finalDataUrl = await compressImage(dataUrl, 1024, 1024, 0.7);
+                        resolve({ 
+                          id: "anx-" + Math.random().toString(36).substr(2, 9), 
+                          dataUrl: finalDataUrl,
+                          name: file.name,
+                          type: file.type
+                        });
+                      };
                       reader.readAsDataURL(file);
                     });
                   });

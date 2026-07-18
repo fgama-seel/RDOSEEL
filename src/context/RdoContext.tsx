@@ -467,9 +467,9 @@ export const RdoProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         logActionType = "STATUS_CHANGE";
         logMessage = `Status do RDO ${reportToSave.rdoNo} da obra ${reportToSave.obra} alterado de '${oldReport.status}' para '${reportToSave.status}'.`;
       } else if (
-        (oldReport.assinaturas?.fiscalizacao?.assinado !== reportToSave.assinaturas?.fiscalizacao?.assinado) ||
-        (oldReport.assinaturas?.gerenciadora?.assinado !== reportToSave.assinaturas?.gerenciadora?.assinado) ||
-        (oldReport.assinaturas?.contratada?.assinado !== reportToSave.assinaturas?.contratada?.assinado)
+        (oldReport.emitenteAssinado !== reportToSave.emitenteAssinado) ||
+        (oldReport.gerenciadoraAssinado !== reportToSave.gerenciadoraAssinado) ||
+        (oldReport.contratanteAssinado !== reportToSave.contratanteAssinado)
       ) {
         logActionType = "SIGNATURE_UPDATE";
         logMessage = `Assinaturas atualizadas no RDO ${reportToSave.rdoNo} da obra ${reportToSave.obra}.`;

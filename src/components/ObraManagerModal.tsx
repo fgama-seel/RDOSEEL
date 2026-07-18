@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useRdoStore } from "../context/RdoContext";
 import { ObraConfig, ObraActivity, ObraPermission } from "../types";
+import { compressImage } from "../utils/imageUtils";
 import { 
   X, 
   Plus, 
@@ -122,18 +123,19 @@ export const ObraManagerModal: React.FC<ObraManagerModalProps> = ({ isOpen, onCl
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (file.size > 500 * 1024) {
-      alert("A imagem selecionada excede o limite recomendado de 500KB.");
+    if (file.size > 5 * 1024 * 1024) {
+      alert("A imagem selecionada é muito grande (> 5MB). Por favor, escolha uma imagem menor.");
       return;
     }
 
     const reader = new FileReader();
-    reader.onloadend = () => {
+    reader.onloadend = async () => {
       const base64 = reader.result as string;
+      const compressed = await compressImage(base64, 512, 512, 0.8);
       if (target === "cliente") {
-        setLogoCliente(base64);
+        setLogoCliente(compressed);
       } else {
-        setLogoSeel(base64);
+        setLogoSeel(compressed);
       }
     };
     reader.readAsDataURL(file);
