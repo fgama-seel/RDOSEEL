@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useRdoStore } from "../context/RdoContext";
-import { ObraConfig, ObraActivity, ObraPermission } from "../types";
+import { ObraConfig, ObraActivity, ObraPermission, ObraEfetivoMember } from "../types";
 import { compressImage } from "../utils/imageUtils";
 import { 
   X, 
@@ -42,6 +42,7 @@ export const ObraManagerModal: React.FC<ObraManagerModalProps> = ({ isOpen, onCl
   const [atividades, setAtividades] = useState<ObraActivity[]>([]);
   const [subcontratadas, setSubcontratadas] = useState<string[]>([]);
   const [permissoes, setPermissoes] = useState<ObraPermission[]>([]);
+  const [quadroEfetivos, setQuadroEfetivos] = useState<ObraEfetivoMember[]>([]);
 
   // Default signers per Obra
   const [emissorNomeDefault, setEmissorNomeDefault] = useState("");
@@ -62,6 +63,12 @@ export const ObraManagerModal: React.FC<ObraManagerModalProps> = ({ isOpen, onCl
   const [newActDescricao, setNewActDescricao] = useState("");
   const [newActUnidade, setNewActUnidade] = useState("m³");
 
+  // Quadro de Efetivos temp fields
+  const [newEfetivoEmpresa, setNewEfetivoEmpresa] = useState<string>("SEEL SERVIÇOS DE ENGENHARIA LTDA");
+  const [newEfetivoCargo, setNewEfetivoCargo] = useState<string>("");
+  const [newEfetivoMoiMod, setNewEfetivoMoiMod] = useState<"MOI" | "MOD">("MOD");
+  const [newEfetivoCadastrados, setNewEfetivoCadastrados] = useState<number>(1);
+
   const [message, setMessage] = useState<{ text: string; type: "success" | "error" } | null>(null);
 
   // Load selected Obra into form
@@ -81,6 +88,7 @@ export const ObraManagerModal: React.FC<ObraManagerModalProps> = ({ isOpen, onCl
       setAtividades([]);
       setSubcontratadas([]);
       setPermissoes([]);
+      setQuadroEfetivos([]);
       setEmissorNomeDefault("");
       setFiscalGerenciadoraNomeDefault("");
       setFiscalAprovadorNomeDefault("");
@@ -100,6 +108,7 @@ export const ObraManagerModal: React.FC<ObraManagerModalProps> = ({ isOpen, onCl
         setAtividades(idx.atividades || []);
         setSubcontratadas(idx.subcontratadas || []);
         setPermissoes(idx.permissoes || []);
+        setQuadroEfetivos(idx.quadroEfetivos || []);
         setEmissorNomeDefault(idx.emissorNomeDefault || "");
         setFiscalGerenciadoraNomeDefault(idx.fiscalGerenciadoraNomeDefault || "");
         setFiscalAprovadorNomeDefault(idx.fiscalAprovadorNomeDefault || "");
@@ -335,6 +344,43 @@ export const ObraManagerModal: React.FC<ObraManagerModalProps> = ({ isOpen, onCl
     });
   };
 
+  // Quadro de Efetivos handlers
+  const handleAddQuadroEfetivoMember = () => {
+    if (!newEfetivoCargo.trim()) {
+      alert("Informe a função/cargo do colaborador.");
+      return;
+    }
+    const newMember: ObraEfetivoMember = {
+      id: "efet-" + Math.random().toString(36).substring(2, 9),
+      empresa: newEfetivoEmpresa || contratada || "SEEL SERVIÇOS DE ENGENHARIA LTDA",
+      cargo: newEfetivoCargo.trim(),
+      moiMod: newEfetivoMoiMod,
+      cadastradosPadrao: Math.max(1, Number(newEfetivoCadastrados || 1))
+    };
+    setQuadroEfetivos([...quadroEfetivos, newMember]);
+    setNewEfetivoCargo("");
+    setNewEfetivoCadastrados(1);
+  };
+
+  const handleRemoveQuadroEfetivoMember = (id: string) => {
+    setQuadroEfetivos(quadroEfetivos.filter(m => m.id !== id));
+  };
+
+  const handleSeedDefaultEfetivos = () => {
+    const defaultRoles: ObraEfetivoMember[] = [
+      { id: "efet-1", empresa: contratada || "SEEL SERVIÇOS DE ENGENHARIA LTDA", cargo: "Engenheiro Residente / Coordenador", moiMod: "MOI", cadastradosPadrao: 1 },
+      { id: "efet-2", empresa: contratada || "SEEL SERVIÇOS DE ENGENHARIA LTDA", cargo: "Técnico de Segurança do Trabalho (TST)", moiMod: "MOI", cadastradosPadrao: 1 },
+      { id: "efet-3", empresa: contratada || "SEEL SERVIÇOS DE ENGENHARIA LTDA", cargo: "Encarregado Geral de Obra", moiMod: "MOI", cadastradosPadrao: 1 },
+      { id: "efet-4", empresa: contratada || "SEEL SERVIÇOS DE ENGENHARIA LTDA", cargo: "Carpinteiro", moiMod: "MOD", cadastradosPadrao: 2 },
+      { id: "efet-5", empresa: contratada || "SEEL SERVIÇOS DE ENGENHARIA LTDA", cargo: "Armador", moiMod: "MOD", cadastradosPadrao: 2 },
+      { id: "efet-6", empresa: contratada || "SEEL SERVIÇOS DE ENGENHARIA LTDA", cargo: "Pedreiro", moiMod: "MOD", cadastradosPadrao: 2 },
+      { id: "efet-7", empresa: contratada || "SEEL SERVIÇOS DE ENGENHARIA LTDA", cargo: "Ajudante Geral de Obra", moiMod: "MOD", cadastradosPadrao: 4 },
+      { id: "efet-8", empresa: contratada || "SEEL SERVIÇOS DE ENGENHARIA LTDA", cargo: "Operador de Máquinas / Equipamentos", moiMod: "MOD", cadastradosPadrao: 1 }
+    ];
+    setQuadroEfetivos(prev => [...prev, ...defaultRoles]);
+    setMessage({ text: "Funções padrão de obra inseridas no Quadro de Efetivos com sucesso!", type: "success" });
+  };
+
   // Save the full Obra details
   const handleSaveObraConfig = async () => {
     if (!nome.trim() || !cliente.trim() || !contratada.trim() || !gerenciadora.trim()) {
@@ -358,6 +404,7 @@ export const ObraManagerModal: React.FC<ObraManagerModalProps> = ({ isOpen, onCl
       subcontratadas,
       permissoes,
       atividades,
+      quadroEfetivos,
       
       // Signers Default Names
       emissorNomeDefault: emissorNomeDefault.trim(),
@@ -969,6 +1016,129 @@ export const ObraManagerModal: React.FC<ObraManagerModalProps> = ({ isOpen, onCl
                     ) : (
                       <tr>
                         <td colSpan={6} className="px-3.5 py-6 text-center text-slate-400 italic">Cadastre acima as linhas da Planilha de Quantidades da Obra. Elas estarão disponíveis ao preencher os relatórios diários rápidos.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            {/* SECT 7: QUADRO DE EFETIVOS DA OBRA */}
+            <section className="bg-slate-50/50 p-4 rounded-xl border border-slate-200 space-y-4 font-sans">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 pb-2">
+                <div>
+                  <h4 className="font-bold text-xs text-slate-800 uppercase tracking-wide flex items-center gap-1.5">
+                    <Users className="w-4 h-4 text-amber-600" />
+                    7. Quadro de Efetivos da Obra (Cadastro de Equipes / Cargos)
+                  </h4>
+                  <p className="text-[10px] text-slate-500">
+                    Cadastre aqui as funções e equipes da contratada e subcontratadas. Ao preencher o RDO, o usuário poderá selecionar diretamente desta lista.
+                  </p>
+                </div>
+                
+                <button
+                  type="button"
+                  onClick={handleSeedDefaultEfetivos}
+                  className="px-2.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-[10px] font-bold rounded flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  Gerar Cargos Padrão
+                </button>
+              </div>
+
+              {/* Form to add single cargo */}
+              <div className="bg-white border rounded-xl p-3 gap-3 grid grid-cols-1 md:grid-cols-5 items-end text-slate-700">
+                <div className="space-y-1">
+                  <label className="text-[9px] text-slate-500 font-bold uppercase block">Empresa *</label>
+                  <select
+                    value={newEfetivoEmpresa}
+                    onChange={(e) => setNewEfetivoEmpresa(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded p-1.5 text-xs outline-none"
+                  >
+                    <option value={contratada || "SEEL SERVIÇOS DE ENGENHARIA LTDA"}>
+                      {contratada || "SEEL SERVIÇOS DE ENGENHARIA LTDA"} (Principal)
+                    </option>
+                    {subcontratadas.map((sub) => (
+                      <option key={sub} value={sub}>{sub}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-1 md:col-span-2">
+                  <label className="text-[9px] text-slate-500 font-bold uppercase block">Cargo / Função *</label>
+                  <input
+                    type="text"
+                    value={newEfetivoCargo}
+                    onChange={(e) => setNewEfetivoCargo(e.target.value)}
+                    placeholder="Ex: Carpinteiro, Armador, Operador de Guindaste..."
+                    className="w-full bg-slate-50 border border-slate-200 rounded p-1.5 text-xs outline-none font-medium"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[9px] text-slate-500 font-bold uppercase block">Tipo Mão de Obra</label>
+                  <select
+                    value={newEfetivoMoiMod}
+                    onChange={(e) => setNewEfetivoMoiMod(e.target.value as "MOI" | "MOD")}
+                    className="w-full bg-slate-50 border border-slate-200 rounded p-1.5 text-xs outline-none font-semibold"
+                  >
+                    <option value="MOD">Direta (MOD)</option>
+                    <option value="MOI">Indireta (MOI)</option>
+                  </select>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleAddQuadroEfetivoMember}
+                  className="w-full bg-slate-900 hover:bg-slate-800 font-bold rounded text-white py-1.5 flex items-center justify-center gap-1 text-xs"
+                >
+                  <Plus className="w-3.5 h-3.5 text-white" />
+                  Cadastrar Função
+                </button>
+              </div>
+
+              {/* Roster Table */}
+              <div className="border border-slate-200 rounded-lg overflow-hidden bg-white text-[11px] max-h-60 overflow-y-auto">
+                <table className="w-full text-left divide-y divide-slate-200">
+                  <thead className="bg-slate-100 text-slate-700 font-bold uppercase text-[9px] sticky top-0">
+                    <tr>
+                      <th className="px-3.5 py-2">Empresa</th>
+                      <th className="px-3.5 py-2">Cargo / Função</th>
+                      <th className="px-3.5 py-2 text-center">Tipo</th>
+                      <th className="px-3.5 py-2 text-right">Ação</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200 bg-white">
+                    {quadroEfetivos.length > 0 ? (
+                      quadroEfetivos.map((mem) => (
+                        <tr key={mem.id} className="hover:bg-slate-50">
+                          <td className="px-3.5 py-2 font-semibold text-slate-700">{mem.empresa}</td>
+                          <td className="px-3.5 py-2 font-medium text-slate-900">{mem.cargo}</td>
+                          <td className="px-3.5 py-2 text-center">
+                            <span className={`px-2 py-0.5 rounded text-[9px] font-bold ${
+                              mem.moiMod === "MOI" 
+                                ? "bg-amber-100 text-amber-900 border border-amber-300" 
+                                : "bg-sky-100 text-sky-900 border border-sky-300"
+                            }`}>
+                              {mem.moiMod === "MOI" ? "INDIRETA (MOI)" : "DIRETA (MOD)"}
+                            </span>
+                          </td>
+                          <td className="px-3.5 py-2 text-right">
+                            <button
+                              onClick={() => handleRemoveQuadroEfetivoMember(mem.id)}
+                              className="text-red-500 hover:text-red-700 font-bold p-1 hover:bg-red-50 rounded transition-colors"
+                              title="Remover função"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={4} className="px-3.5 py-6 text-center text-slate-400 italic">
+                          Nenhum cargo/função cadastrado ainda. Adicione acima ou clique em "Gerar Cargos Padrão" para preenchimento rápido.
+                        </td>
                       </tr>
                     )}
                   </tbody>

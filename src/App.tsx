@@ -68,6 +68,7 @@ function AppContent() {
   const permission = currentObra?.permissoes?.find(p => p?.email?.toLowerCase() === currentUserEmail);
   const accessLevel = permission ? permission.access : (currentObra?.userId === user?.uid ? "owner" : "view");
   const canManageObras = isGlobalAdmin || (accessLevel !== "view" && accessLevel !== "fiscalizacao" && accessLevel !== "gerenciadora");
+  const canCreateRdo = isGlobalAdmin || (accessLevel !== "view" && accessLevel !== "fiscalizacao" && accessLevel !== "gerenciadora");
 
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<"todos" | "Em Digitação" | "Finalizado" | "Assinado">("todos");
@@ -279,13 +280,15 @@ function AppContent() {
 
           {/* Create Button & Search bar */}
           <div className="p-4 pt-3 border-b border-slate-850 space-y-3 shrink-0 bg-slate-950/20">
-            <button
-              onClick={handleCreateNewRdo}
-              className="w-full h-9 bg-amber-600 hover:bg-amber-700 text-white rounded font-bold text-xs tracking-wide flex items-center justify-center gap-1.5 transition-all shadow-sm outline-none cursor-pointer"
-            >
-              <Plus className="w-4 h-4 text-yellow-105" />
-              NOVO DIÁRIO DE OBRA (RDO)
-            </button>
+            {canCreateRdo && (
+              <button
+                onClick={handleCreateNewRdo}
+                className="w-full h-9 bg-amber-600 hover:bg-amber-700 text-white rounded font-bold text-xs tracking-wide flex items-center justify-center gap-1.5 transition-all shadow-sm outline-none cursor-pointer"
+              >
+                <Plus className="w-4 h-4 text-yellow-105" />
+                NOVO DIÁRIO DE OBRA (RDO)
+              </button>
+            )}
 
             <div className="relative">
               <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-2.5" />
@@ -421,13 +424,15 @@ function AppContent() {
                               {totalRain}mm
                             </span>
                           )}
-                          <button
-                            onClick={(e) => handleDeleteClick(e, report.id!)}
-                            className="text-slate-500 hover:text-red-400 p-0.5 rounded transition-colors"
-                            title="Excluir do histórico"
-                          >
-                            <Trash2 className="w-3 h-3" />
-                          </button>
+                          {canCreateRdo && (
+                            <button
+                              onClick={(e) => handleDeleteClick(e, report.id!)}
+                              className="text-slate-500 hover:text-red-400 p-0.5 rounded transition-colors"
+                              title="Excluir do histórico"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -458,14 +463,18 @@ function AppContent() {
               </div>
               <h3 className="font-bold text-gray-800">Seja Bem-vindo ao RDO Web</h3>
               <p className="text-xs text-gray-500 leading-relaxed">
-                Este sistema foi modelado para preenchimento rápido e emissão do diário no formato padrão das gerenciadoras para SEEL / SABESP. Selecione um registro no histórico ou clique no botão para criar.
+                {canCreateRdo 
+                  ? "Este sistema foi modelado para preenchimento rápido e emissão do diário no formato padrão das gerenciadoras para SEEL / SABESP. Selecione um registro no histórico ou clique no botão para criar."
+                  : "Este sistema foi modelado para preenchimento rápido e emissão do diário no formato padrão das gerenciadoras para SEEL / SABESP. Selecione um diário no histórico ao lado para visualizar os detalhes."}
               </p>
-              <button
-                onClick={handleCreateNewRdo}
-                className="bg-[#004899] hover:bg-blue-800 text-white font-semibold text-xs px-4 py-2 rounded-lg"
-              >
-                Criar Primeiro Relatório
-              </button>
+              {canCreateRdo && (
+                <button
+                  onClick={handleCreateNewRdo}
+                  className="bg-[#004899] hover:bg-blue-800 text-white font-semibold text-xs px-4 py-2 rounded-lg"
+                >
+                  Criar Primeiro Relatório
+                </button>
+              )}
             </div>
           )}
         </main>

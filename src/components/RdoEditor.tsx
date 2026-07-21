@@ -10,6 +10,8 @@ import {
   CompanyLaborGroup, 
   EquipmentMobilizedDetail, 
   StoppageDetailRow,
+  StoppageFrenteItem,
+  ObraEfetivoMember,
   HOURS_LIST
 } from "../types";
 import { compressImage } from "../utils/imageUtils";
@@ -50,6 +52,10 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [cloneType, setCloneType] = useState<"efetivo" | "equipamentos" | null>(null);
+  const [isEfetivoModalOpen, setIsEfetivoModalOpen] = useState(false);
+  const [pqPickerForCat, setPqPickerForCat] = useState<string | null>(null);
+  const [laborPickerTarget, setLaborPickerTarget] = useState<{ catKey: string; fIdx: number } | null>(null);
+  const [equipPickerTarget, setEquipPickerTarget] = useState<{ catKey: string; fIdx: number } | null>(null);
 
   const [confirmModal, setConfirmModal] = useState<{
     isOpen: boolean;
@@ -123,7 +129,7 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
   
   const isUserFiscalizacao = accessLevel === "fiscalizacao" || accessLevel === "owner";
   const isUserGerenciadora = accessLevel === "gerenciadora" || accessLevel === "owner";
-  const isAnalista = accessLevel === "fiscalizacao" || accessLevel === "gerenciadora" || accessLevel === "owner";
+  const isAnalista = accessLevel === "fiscalizacao" || accessLevel === "gerenciadora";
   
   const hasFiscal = currentObra?.permissoes?.some(p => p.access === "fiscalizacao" || p.access === "gerenciadora") || false;
 
@@ -1382,10 +1388,66 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
             </div>
 
             <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider border-b border-slate-200 pb-1.5 pt-2">Registro de Horas por Tipo de Paralisação</h3>
-            <div className="space-y-3">
+            <div className="space-y-4">
               {Object.entries(currentReport.paralisacoesDetalhe || {}).map(([catKey, rowVal]) => {
                 const row = rowVal as StoppageDetailRow;
                 const isChecked = row.ativo;
+                const associatedObra = obras.find(o => o.id === currentReport.obraId || o.nome === currentReport.obra);
+                const registeredPq = associatedObra?.atividades || [];
+
+                // Frentes items array
+                const frentesItems: StoppageFrenteItem[] = row.frentesItems || (
+                  row.frentes && row.frentes.trim() 
+                    ? [{ id: 'f-init-' + catKey, nome: row.frentes }] 
+                    : []
+                );
+
+                const updateFrentesForCat = (newItems: StoppageFrenteItem[]) => {
+                  const frentesStr = newItems
+                    .map(it => {
+                      if (it.pqItemDesc) {
+                        return it.nome ? `${it.nome} (${it.pqItemDesc})` : it.pqItemDesc;
+                      }
+                      return it.nome;
+                    })
+                    .filter(Boolean)
+                    .join(", ");
+
+                  handleUpdateStoppage(catKey as any, {
+                    frentesItems: newItems,
+                    frentes: frentesStr
+                  });
+                };
+
+                const handleAddFrenteManual = () => {
+                  const newItems = [...frentesItems, { id: 'f-' + Date.now() + '-' + Math.random().toString(36).substring(2, 5), nome: '' }];
+                  updateFrentesForCat(newItems);
+                };
+
+                const handleUpdateFrenteItem = (index: number, fields: Partial<StoppageFrenteItem>) => {
+                  const currentItems = [...frentesItems];
+                  currentItems[index] = { ...currentItems[index], ...fields };
+                  updateFrentesForCat(currentItems);
+                };
+
+                const handleDeleteFrenteItem = (index: number) => {
+                  const newItems = frentesItems.filter((_, i) => i !== index);
+                  updateFrentesForCat(newItems);
+                };
+
+                const handleAddFrenteFromPq = (act: any) => {
+                  const descFormat = `[${act.identificador || act.ref}] ${act.descricao}`;
+                  const exists = frentesItems.some(i => i.pqItemId === act.id);
+                  if (exists) return;
+                  const newItems = [...frentesItems, {
+                    id: 'f-pq-' + Date.now() + '-' + Math.random().toString(36).substring(2, 5),
+                    nome: `${act.fase ? act.fase + ' - ' : ''}${act.descricao.substring(0, 40)}`,
+                    pqItemId: act.id,
+                    pqItemDesc: descFormat
+                  }];
+                  updateFrentesForCat(newItems);
+                };
+
                 return (
                   <div key={catKey} className="bg-white p-3.5 rounded border border-slate-200 shadow-xs space-y-3">
                     <div className="flex items-center justify-between">
@@ -1410,7 +1472,7 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
                     </div>
 
                     {isChecked && (
-                      <div className="space-y-3 pt-2.5 border-t border-slate-100 animate-slide-down">
+                      <div className="space-y-4 pt-2.5 border-t border-slate-100 animate-slide-down">
                         <div>
                           <span className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5 tracking-wider">Tocar no horário para marcar inoperância:</span>
                           <div className="grid grid-cols-6 sm:grid-cols-12 gap-1.5">
@@ -1433,39 +1495,298 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
                           </div>
                         </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                          <div>
-                            <label className="block text-[10px] font-bold text-slate-500 uppercase">Frentes Paralisadas</label>
-                            <input
-                              type="text"
-                              value={row.frentes}
-                              onChange={(e) => handleUpdateStoppage(catKey as any, { frentes: e.target.value })}
-                              className="mt-1 block h-8 w-full rounded border-slate-300 text-xs text-slate-800 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 bg-slate-50/20"
-                              placeholder="Frente de trabalho 1"
-                            />
+                        {/* Multi-Frentes Paralisadas Component with PQ Association */}
+                        <div className="bg-slate-50/70 p-3 rounded-lg border border-slate-200 space-y-2">
+                          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-2">
+                            <label className="text-[10px] font-bold text-slate-700 uppercase flex items-center gap-1.5">
+                              <Wrench className="w-3.5 h-3.5 text-amber-600" />
+                              Frentes Paralisadas e Vínculo com a PQ ({frentesItems.length})
+                            </label>
+                            
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={handleAddFrenteManual}
+                                className="px-2.5 py-1 bg-white hover:bg-slate-100 border border-slate-300 text-slate-700 text-[10px] font-bold rounded flex items-center gap-1 transition-colors cursor-pointer shadow-2xs"
+                              >
+                                <Plus className="w-3 h-3 text-amber-600" />
+                                + Adicionar Frente
+                              </button>
+
+                              {registeredPq.length > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => setPqPickerForCat(pqPickerForCat === catKey ? null : catKey)}
+                                  className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white text-[10px] font-bold rounded flex items-center gap-1 transition-colors cursor-pointer shadow-2xs"
+                                >
+                                  <FileSpreadsheet className="w-3 h-3" />
+                                  + Selecionar da PQ da Obra
+                                </button>
+                              )}
+                            </div>
                           </div>
 
-                          <div>
-                            <label className="block text-[10px] font-bold text-slate-500 uppercase">Efetivo de Obra Paralisado</label>
-                            <input
-                              type="text"
-                              value={row.maoDeObraParalisada}
-                              onChange={(e) => handleUpdateStoppage(catKey as any, { maoDeObraParalisada: e.target.value })}
-                              className="mt-1 block h-8 w-full rounded border-slate-300 text-xs text-slate-800 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 bg-slate-50/20"
-                              placeholder="Carpinteiros, Ajudantes..."
-                            />
-                          </div>
+                          {/* PQ Picker dropdown panel if open */}
+                          {pqPickerForCat === catKey && (
+                            <div className="bg-white border border-amber-300 rounded-lg p-2.5 shadow-md space-y-2 max-h-56 overflow-y-auto animate-fade-in">
+                              <div className="flex justify-between items-center text-[10px] font-bold text-slate-700 border-b pb-1">
+                                <span>Clique nos itens da Planilha de Quantidades (PQ) para associar:</span>
+                                <button onClick={() => setPqPickerForCat(null)} className="text-slate-400 hover:text-slate-600 p-0.5 cursor-pointer">
+                                  <X className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                              <div className="divide-y divide-slate-100">
+                                {registeredPq.map((act) => {
+                                  const isAdded = frentesItems.some(i => i.pqItemId === act.id);
+                                  return (
+                                    <div
+                                      key={act.id}
+                                      onClick={() => handleAddFrenteFromPq(act)}
+                                      className={`p-1.5 text-xs flex items-center justify-between cursor-pointer rounded transition-colors ${
+                                        isAdded ? "bg-amber-50 text-amber-900 font-semibold" : "hover:bg-slate-50 text-slate-700"
+                                      }`}
+                                    >
+                                      <div className="truncate pr-2">
+                                        <span className="font-mono text-amber-700 font-bold mr-1.5">[{act.identificador || act.ref}]</span>
+                                        <span className="text-[11px]">{act.descricao}</span>
+                                        {act.fase && <span className="text-[9px] text-slate-400 block italic">{act.fase}</span>}
+                                      </div>
+                                      {isAdded ? (
+                                        <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                                      ) : (
+                                        <Plus className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
 
-                          <div>
-                            <label className="block text-[10px] font-bold text-slate-500 uppercase">Notas Explicativas / Observações</label>
-                            <input
-                              type="text"
-                              value={row.comentarios}
-                              onChange={(e) => handleUpdateStoppage(catKey as any, { comentarios: e.target.value })}
-                              className="mt-1 block h-8 w-full rounded border-slate-300 text-xs text-slate-800 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 bg-slate-50/20"
-                              placeholder="Inoperância temporária..."
-                            />
-                          </div>
+                          {/* List of frentes */}
+                          {frentesItems.length > 0 ? (
+                            <div className="space-y-3 pt-1">
+                              {frentesItems.map((item, fIdx) => (
+                                <div key={item.id || fIdx} className="bg-white p-3 rounded-lg border border-slate-200 shadow-2xs space-y-2.5">
+                                  {/* Row 1: Frente Name + PQ Link + Delete */}
+                                  <div className="flex flex-col sm:flex-row gap-2 items-start sm:items-center justify-between">
+                                    <div className="flex-1 w-full sm:w-auto">
+                                      <label className="block text-[9px] font-bold text-slate-500 uppercase mb-0.5">Frente de Serviço / Trabalho:</label>
+                                      <input
+                                        type="text"
+                                        value={item.nome}
+                                        onChange={(e) => handleUpdateFrenteItem(fIdx, { nome: e.target.value })}
+                                        placeholder="ex: Escavação Vala 01, Fundações Trecho A..."
+                                        className="w-full h-8 px-2 rounded border border-slate-300 text-xs text-slate-800 font-semibold focus:border-amber-500 focus:ring-1 focus:ring-amber-500 bg-white"
+                                      />
+                                    </div>
+
+                                    <div className="w-full sm:w-1/2">
+                                      <label className="block text-[9px] font-bold text-slate-500 uppercase mb-0.5">Item Vinculado da PQ (Obra):</label>
+                                      <select
+                                        value={item.pqItemId || ""}
+                                        onChange={(e) => {
+                                          const selectedAct = registeredPq.find(a => a.id === e.target.value);
+                                          handleUpdateFrenteItem(fIdx, {
+                                            pqItemId: e.target.value || undefined,
+                                            pqItemDesc: selectedAct ? `[${selectedAct.identificador || selectedAct.ref}] ${selectedAct.descricao}` : undefined
+                                          });
+                                        }}
+                                        className="w-full h-8 px-2 rounded border border-slate-300 text-xs text-slate-700 bg-slate-50 focus:border-amber-500 focus:ring-1 focus:ring-amber-500"
+                                      >
+                                        <option value="">-- Sem vínculo com item da PQ --</option>
+                                        {registeredPq.map(act => (
+                                          <option key={act.id} value={act.id}>
+                                            [{act.identificador || act.ref}] {act.descricao.substring(0, 45)}
+                                          </option>
+                                        ))}
+                                      </select>
+                                    </div>
+
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeleteFrenteItem(fIdx)}
+                                      className="p-1.5 text-red-500 hover:text-red-700 hover:bg-red-50 rounded transition-colors self-end sm:self-center shrink-0 cursor-pointer"
+                                      title="Remover esta frente de trabalho"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+
+                                  {/* Row 2: Selected Mão de Obra & Equipamentos for this Frente */}
+                                  <div className="pt-2 border-t border-slate-100 grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+                                    {/* Mão de Obra Parada (do Quadro de Efetivos) */}
+                                    <div className="bg-amber-50/60 p-2 rounded-md border border-amber-200/60 space-y-1.5">
+                                      <div className="flex items-center justify-between">
+                                        <span className="text-[10px] font-bold text-amber-900 uppercase flex items-center gap-1">
+                                          <Users className="w-3 h-3 text-amber-600" />
+                                          Efetivo Parado (Quadro de Efetivos)
+                                        </span>
+                                        <button
+                                          type="button"
+                                          onClick={() => setLaborPickerTarget({ catKey, fIdx })}
+                                          className="px-2 py-0.5 bg-amber-600 hover:bg-amber-700 text-white rounded text-[9.5px] font-bold cursor-pointer transition-colors shadow-2xs flex items-center gap-1 border-none"
+                                        >
+                                          <Plus className="w-3 h-3" />
+                                          Selecionar Efetivo
+                                        </button>
+                                      </div>
+
+                                      {item.maoDeObraDescs && item.maoDeObraDescs.length > 0 ? (
+                                        <div className="flex flex-wrap gap-1.5 pt-0.5">
+                                          {item.maoDeObraDescs.map((desc, dIdx) => {
+                                            const { desc: cleanDesc, qtd } = parseItemQty(desc);
+                                            return (
+                                              <span key={dIdx} className="inline-flex items-center gap-1.5 px-2 py-1 bg-amber-100 text-amber-950 text-[10px] font-semibold rounded-md border border-amber-300/80 shadow-2xs">
+                                                <button
+                                                  type="button"
+                                                  title="Diminuir quantidade"
+                                                  onClick={() => {
+                                                    const newQtd = qtd - 1;
+                                                    const updatedDescs = [...item.maoDeObraDescs!];
+                                                    if (newQtd <= 0) {
+                                                      updatedDescs.splice(dIdx, 1);
+                                                    } else {
+                                                      updatedDescs[dIdx] = formatItemQty(cleanDesc, newQtd);
+                                                    }
+                                                    handleUpdateFrenteItem(fIdx, { maoDeObraDescs: updatedDescs, maoDeObraIds: updatedDescs });
+                                                  }}
+                                                  className="w-4 h-4 rounded hover:bg-amber-200 text-amber-900 flex items-center justify-center cursor-pointer border-none font-bold text-[11px] shrink-0"
+                                                >
+                                                  -
+                                                </button>
+                                                <span><strong className="text-amber-900 font-extrabold">{qtd}x</strong> {cleanDesc}</span>
+                                                <button
+                                                  type="button"
+                                                  title="Aumentar quantidade"
+                                                  onClick={() => {
+                                                    const newQtd = qtd + 1;
+                                                    const updatedDescs = [...item.maoDeObraDescs!];
+                                                    updatedDescs[dIdx] = formatItemQty(cleanDesc, newQtd);
+                                                    handleUpdateFrenteItem(fIdx, { maoDeObraDescs: updatedDescs, maoDeObraIds: updatedDescs });
+                                                  }}
+                                                  className="w-4 h-4 rounded hover:bg-amber-200 text-amber-900 flex items-center justify-center cursor-pointer border-none font-bold text-[11px] shrink-0"
+                                                >
+                                                  +
+                                                </button>
+                                                <button
+                                                  type="button"
+                                                  title="Remover"
+                                                  onClick={() => {
+                                                    const updatedIds = (item.maoDeObraIds || []).filter((_, i) => i !== dIdx);
+                                                    const updatedDescs = (item.maoDeObraDescs || []).filter((_, i) => i !== dIdx);
+                                                    handleUpdateFrenteItem(fIdx, { maoDeObraIds: updatedIds, maoDeObraDescs: updatedDescs });
+                                                  }}
+                                                  className="ml-0.5 hover:text-red-700 text-amber-800 cursor-pointer border-none bg-transparent shrink-0"
+                                                >
+                                                  <X className="w-3 h-3" />
+                                                </button>
+                                              </span>
+                                            );
+                                          })}
+                                        </div>
+                                      ) : (
+                                        <p className="text-[9.5px] text-slate-400 italic">Nenhum membro/cargo do quadro de efetivo selecionado.</p>
+                                      )}
+                                    </div>
+
+                                    {/* Equipamentos Parados (da aba Equipamentos) */}
+                                    <div className="bg-sky-50/60 p-2 rounded-md border border-sky-200/60 space-y-1.5">
+                                      <div className="flex items-center justify-between">
+                                        <span className="text-[10px] font-bold text-sky-900 uppercase flex items-center gap-1">
+                                          <Wrench className="w-3 h-3 text-sky-600" />
+                                          Equipamentos Parados (Aba Equipamentos)
+                                        </span>
+                                        <button
+                                          type="button"
+                                          onClick={() => setEquipPickerTarget({ catKey, fIdx })}
+                                          className="px-2 py-0.5 bg-sky-700 hover:bg-sky-800 text-white rounded text-[9.5px] font-bold cursor-pointer transition-colors shadow-2xs flex items-center gap-1 border-none"
+                                        >
+                                          <Plus className="w-3 h-3" />
+                                          Selecionar Equipamento
+                                        </button>
+                                      </div>
+
+                                      {item.equipamentoDescs && item.equipamentoDescs.length > 0 ? (
+                                        <div className="flex flex-wrap gap-1.5 pt-0.5">
+                                          {item.equipamentoDescs.map((desc, dIdx) => {
+                                            const { desc: cleanDesc, qtd } = parseItemQty(desc);
+                                            return (
+                                              <span key={dIdx} className="inline-flex items-center gap-1.5 px-2 py-1 bg-sky-100 text-sky-950 text-[10px] font-semibold rounded-md border border-sky-300/80 shadow-2xs">
+                                                <button
+                                                  type="button"
+                                                  title="Diminuir quantidade"
+                                                  onClick={() => {
+                                                    const newQtd = qtd - 1;
+                                                    const updatedDescs = [...item.equipamentoDescs!];
+                                                    if (newQtd <= 0) {
+                                                      updatedDescs.splice(dIdx, 1);
+                                                    } else {
+                                                      updatedDescs[dIdx] = formatItemQty(cleanDesc, newQtd);
+                                                    }
+                                                    handleUpdateFrenteItem(fIdx, { equipamentoDescs: updatedDescs, equipamentoIds: updatedDescs });
+                                                  }}
+                                                  className="w-4 h-4 rounded hover:bg-sky-200 text-sky-900 flex items-center justify-center cursor-pointer border-none font-bold text-[11px] shrink-0"
+                                                >
+                                                  -
+                                                </button>
+                                                <span><strong className="text-sky-950 font-extrabold">{qtd}x</strong> {cleanDesc}</span>
+                                                <button
+                                                  type="button"
+                                                  title="Aumentar quantidade"
+                                                  onClick={() => {
+                                                    const newQtd = qtd + 1;
+                                                    const updatedDescs = [...item.equipamentoDescs!];
+                                                    updatedDescs[dIdx] = formatItemQty(cleanDesc, newQtd);
+                                                    handleUpdateFrenteItem(fIdx, { equipamentoDescs: updatedDescs, equipamentoIds: updatedDescs });
+                                                  }}
+                                                  className="w-4 h-4 rounded hover:bg-sky-200 text-sky-900 flex items-center justify-center cursor-pointer border-none font-bold text-[11px] shrink-0"
+                                                >
+                                                  +
+                                                </button>
+                                                <button
+                                                  type="button"
+                                                  title="Remover"
+                                                  onClick={() => {
+                                                    const updatedIds = (item.equipamentoIds || []).filter((_, i) => i !== dIdx);
+                                                    const updatedDescs = (item.equipamentoDescs || []).filter((_, i) => i !== dIdx);
+                                                    handleUpdateFrenteItem(fIdx, { equipamentoIds: updatedIds, equipamentoDescs: updatedDescs });
+                                                  }}
+                                                  className="ml-0.5 hover:text-red-700 text-sky-800 cursor-pointer border-none bg-transparent shrink-0"
+                                                >
+                                                  <X className="w-3 h-3" />
+                                                </button>
+                                              </span>
+                                            );
+                                          })}
+                                        </div>
+                                      ) : (
+                                        <p className="text-[9.5px] text-slate-400 italic">Nenhum equipamento mobilizado selecionado.</p>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="text-[10px] text-slate-400 italic p-2 bg-white rounded border border-dashed border-slate-200 text-center">
+                              Nenhuma frente registrada para esta paralisação. Clique nos botões acima para adicionar frentes e vinculá-las à PQ da Obra.
+                            </p>
+                          )}
+                        </div>
+
+                        {/* Notes and Comments */}
+                        <div className="mt-2">
+                          <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">
+                            Notas Explicativas, Justificativas e Comentários da Paralisação
+                          </label>
+                          <textarea
+                            rows={3}
+                            value={row.comentarios}
+                            onChange={(e) => handleUpdateStoppage(catKey as any, { comentarios: e.target.value })}
+                            className="block w-full p-2.5 rounded-lg border border-slate-300 text-xs text-slate-800 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 bg-white placeholder:text-slate-400"
+                            placeholder="Descreva detalhadamente as justificativas, motivos climáticos, operacionais ou interferências associadas..."
+                          />
                         </div>
                       </div>
                     )}
@@ -1527,6 +1848,16 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
                 </div>
                 
                 <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsEfetivoModalOpen(true)}
+                    className="h-8.5 px-3 bg-amber-600 hover:bg-amber-700 text-white rounded text-[10px] font-bold uppercase tracking-wider transition-colors cursor-pointer shrink-0 flex items-center gap-1.5 shadow-xs"
+                    title="Selecionar equipes e membros cadastrados no Quadro de Efetivos da Obra"
+                  >
+                    <Users className="w-3.5 h-3.5" />
+                    Selecionar do Quadro de Efetivos
+                  </button>
+
                   <select
                     className="h-8.5 rounded border border-slate-300 text-xs px-2 text-slate-700 bg-white font-medium focus:border-amber-500 focus:ring-1 focus:ring-amber-500"
                     defaultValue=""
@@ -2731,10 +3062,444 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
           </div>
         )}
 
+        {/* Efetivo Selection Modal */}
+        {isEfetivoModalOpen && (
+          <EfetivoSelectionModal
+            isOpen={isEfetivoModalOpen}
+            onClose={() => setIsEfetivoModalOpen(false)}
+            quadroMembers={(obras.find(o => o.id === currentReport.obraId || o.nome === currentReport.obra)?.quadroEfetivos || []).length > 0
+              ? (obras.find(o => o.id === currentReport.obraId || o.nome === currentReport.obra)?.quadroEfetivos || [])
+              : [
+                  { id: "def-1", empresa: currentObra?.contratada || "SEEL SERVIÇOS DE ENGENHARIA LTDA", cargo: "Engenheiro Residente / Coordenador", moiMod: "MOI", cadastradosPadrao: 1 },
+                  { id: "def-2", empresa: currentObra?.contratada || "SEEL SERVIÇOS DE ENGENHARIA LTDA", cargo: "Técnico de Segurança do Trabalho (TST)", moiMod: "MOI", cadastradosPadrao: 1 },
+                  { id: "def-3", empresa: currentObra?.contratada || "SEEL SERVIÇOS DE ENGENHARIA LTDA", cargo: "Encarregado Geral de Obra", moiMod: "MOI", cadastradosPadrao: 1 },
+                  { id: "def-4", empresa: currentObra?.contratada || "SEEL SERVIÇOS DE ENGENHARIA LTDA", cargo: "Carpinteiro", moiMod: "MOD", cadastradosPadrao: 2 },
+                  { id: "def-5", empresa: currentObra?.contratada || "SEEL SERVIÇOS DE ENGENHARIA LTDA", cargo: "Armador", moiMod: "MOD", cadastradosPadrao: 2 },
+                  { id: "def-6", empresa: currentObra?.contratada || "SEEL SERVIÇOS DE ENGENHARIA LTDA", cargo: "Pedreiro", moiMod: "MOD", cadastradosPadrao: 2 },
+                  { id: "def-7", empresa: currentObra?.contratada || "SEEL SERVIÇOS DE ENGENHARIA LTDA", cargo: "Ajudante Geral de Obra", moiMod: "MOD", cadastradosPadrao: 4 },
+                  { id: "def-8", empresa: currentObra?.contratada || "SEEL SERVIÇOS DE ENGENHARIA LTDA", cargo: "Operador de Perfuratriz / Máquinas", moiMod: "MOD", cadastradosPadrao: 1 }
+                ]
+            }
+            isUsingFallback={(obras.find(o => o.id === currentReport.obraId || o.nome === currentReport.obra)?.quadroEfetivos || []).length === 0}
+            onConfirmSelection={(selectedItems) => {
+              const updatedGrid = [...currentReport.efetivoDetalhado];
+
+              selectedItems.forEach((sel) => {
+                let groupIndex = updatedGrid.findIndex(g => g.nome.trim().toUpperCase() === sel.empresa.trim().toUpperCase());
+                if (groupIndex === -1) {
+                  updatedGrid.push({
+                    id: "gp-" + Date.now() + "-" + Math.random().toString(36).substring(2, 5),
+                    nome: sel.empresa.trim().toUpperCase(),
+                    items: []
+                  });
+                  groupIndex = updatedGrid.length - 1;
+                }
+
+                const group = { ...updatedGrid[groupIndex] };
+                const items = [...group.items];
+                const existingItemIdx = items.findIndex(i => i.cargo.trim().toLowerCase() === sel.cargo.trim().toLowerCase());
+
+                const laborItem = {
+                  id: existingItemIdx !== -1 ? items[existingItemIdx].id : "labor-" + Date.now() + "-" + Math.random().toString(36).substring(2, 5),
+                  cargo: sel.cargo,
+                  c: sel.c,
+                  f: sel.f,
+                  a: sel.a,
+                  t: Math.max(0, sel.c - sel.f),
+                  moiMod: sel.moiMod
+                };
+
+                if (existingItemIdx !== -1) {
+                  items[existingItemIdx] = laborItem;
+                } else {
+                  items.push(laborItem);
+                }
+
+                group.items = items;
+                updatedGrid[groupIndex] = group;
+              });
+
+              let computedMoi = 0;
+              let computedMod = 0;
+              updatedGrid.forEach(g => {
+                g.items.forEach(itm => {
+                  if (itm.moiMod === "MOI") computedMoi += Number(itm.c || 0) - Number(itm.f || 0);
+                  if (itm.moiMod === "MOD") computedMod += Number(itm.c || 0) - Number(itm.f || 0);
+                });
+              });
+
+              updateReport({
+                efetivoDetalhado: updatedGrid,
+                efetivoSummary: {
+                  ...currentReport.efetivoSummary,
+                  moi: computedMoi,
+                  mod: computedMod,
+                  total: computedMoi + computedMod + Number(currentReport.efetivoSummary.subcontratadosMoiMod || 0)
+                }
+              });
+              setIsEfetivoModalOpen(false);
+            }}
+          />
+        )}
+
+        {/* Labor Selection Modal for Frente */}
+        {laborPickerTarget && (() => {
+          const rowVal = currentReport.paralisacoesDetalhe[laborPickerTarget.catKey as keyof typeof currentReport.paralisacoesDetalhe];
+          const frenteItem = rowVal?.frentesItems?.[laborPickerTarget.fIdx];
+          if (!frenteItem) return null;
+
+          const associatedObra = obras.find(o => o.id === currentReport.obraId || o.nome === currentReport.obra);
+
+          return (
+            <LaborSelectionModalForFrente
+              isOpen={!!laborPickerTarget}
+              onClose={() => setLaborPickerTarget(null)}
+              frenteNome={frenteItem.nome || "Frente de Serviço"}
+              currentSelectedDescs={frenteItem.maoDeObraDescs || []}
+              efetivoDetalhado={currentReport.efetivoDetalhado || []}
+              quadroMembers={associatedObra?.quadroEfetivos || []}
+              onConfirm={(selectedDescs) => {
+                const currentFrentes = [...(rowVal.frentesItems || [])];
+                if (currentFrentes[laborPickerTarget.fIdx]) {
+                  currentFrentes[laborPickerTarget.fIdx] = {
+                    ...currentFrentes[laborPickerTarget.fIdx],
+                    maoDeObraDescs: selectedDescs,
+                    maoDeObraIds: selectedDescs
+                  };
+                  handleUpdateStoppage(laborPickerTarget.catKey as any, {
+                    frentesItems: currentFrentes
+                  });
+                }
+                setLaborPickerTarget(null);
+              }}
+            />
+          );
+        })()}
+
+        {/* Equipment Selection Modal for Frente */}
+        {equipPickerTarget && (() => {
+          const rowVal = currentReport.paralisacoesDetalhe[equipPickerTarget.catKey as keyof typeof currentReport.paralisacoesDetalhe];
+          const frenteItem = rowVal?.frentesItems?.[equipPickerTarget.fIdx];
+          if (!frenteItem) return null;
+
+          return (
+            <EquipmentSelectionModalForFrente
+              isOpen={!!equipPickerTarget}
+              onClose={() => setEquipPickerTarget(null)}
+              frenteNome={frenteItem.nome || "Frente de Serviço"}
+              currentSelectedDescs={frenteItem.equipamentoDescs || []}
+              equipamentosMobilizados={currentReport.equipamentosDetalhado || []}
+              onConfirm={(selectedDescs) => {
+                const currentFrentes = [...(rowVal.frentesItems || [])];
+                if (currentFrentes[equipPickerTarget.fIdx]) {
+                  currentFrentes[equipPickerTarget.fIdx] = {
+                    ...currentFrentes[equipPickerTarget.fIdx],
+                    equipamentoDescs: selectedDescs,
+                    equipamentoIds: selectedDescs
+                  };
+                  handleUpdateStoppage(equipPickerTarget.catKey as any, {
+                    frentesItems: currentFrentes
+                  });
+                }
+                setEquipPickerTarget(null);
+              }}
+            />
+          );
+        })()}
+
         </div>
       </div>
     </div>
   );
+};
+interface SelectedMemberState {
+  empresa: string;
+  cargo: string;
+  moiMod: "MOI" | "MOD";
+  c: number;
+  f: number;
+  a: number;
+  selected: boolean;
+}
+
+interface EfetivoSelectionModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  quadroMembers: ObraEfetivoMember[];
+  isUsingFallback?: boolean;
+  onConfirmSelection: (selected: Array<{ empresa: string; cargo: string; moiMod: "MOI" | "MOD"; c: number; f: number; a: number }>) => void;
+}
+
+const EfetivoSelectionModal: React.FC<EfetivoSelectionModalProps> = ({
+  isOpen,
+  onClose,
+  quadroMembers,
+  isUsingFallback,
+  onConfirmSelection
+}) => {
+  const [items, setItems] = React.useState<Record<string, SelectedMemberState>>({});
+  const [filterEmpresa, setFilterEmpresa] = React.useState<string>("TODAS");
+
+  React.useEffect(() => {
+    const initMap: Record<string, SelectedMemberState> = {};
+    quadroMembers.forEach(m => {
+      initMap[m.id] = {
+        empresa: m.empresa,
+        cargo: m.cargo,
+        moiMod: m.moiMod,
+        c: m.cadastradosPadrao || 1,
+        f: 0,
+        a: 0,
+        selected: true
+      };
+    });
+    setItems(initMap);
+  }, [quadroMembers]);
+
+  if (!isOpen) return null;
+
+  const empresasList = Array.from(new Set(quadroMembers.map(m => m.empresa)));
+
+  const handleToggleAll = (checked: boolean) => {
+    const updated = { ...items };
+    Object.keys(updated).forEach(k => {
+      if (filterEmpresa === "TODAS" || updated[k].empresa === filterEmpresa) {
+        updated[k].selected = checked;
+      }
+    });
+    setItems(updated);
+  };
+
+  const handleConfirm = () => {
+    const selectedList = Object.values(items)
+      .filter(i => i.selected)
+      .map(i => ({
+        empresa: i.empresa,
+        cargo: i.cargo,
+        moiMod: i.moiMod,
+        c: Number(i.c || 0),
+        f: Number(i.f || 0),
+        a: Number(i.a || 0)
+      }));
+
+    if (selectedList.length === 0) {
+      alert("Selecione ao menos um membro ou cargo para inserir.");
+      return;
+    }
+
+    onConfirmSelection(selectedList);
+  };
+
+  return (
+    <div className="fixed inset-0 z-[9999] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in font-sans">
+      <div className="bg-white rounded-2xl border border-slate-100 p-5 max-w-3xl w-full shadow-2xl flex flex-col max-h-[90vh]">
+        
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 bg-amber-50 text-amber-600 rounded-xl">
+              <Users className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="font-bold text-sm text-slate-900 uppercase tracking-wide">
+                Quadro de Efetivos da Obra
+              </h3>
+              <p className="text-[10px] text-slate-500">
+                Selecione as equipes/cargos e ajuste os quantitativos para importar neste RDO
+              </p>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-700 cursor-pointer border-none">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Fallback alert banner */}
+        {isUsingFallback && (
+          <div className="mt-3 p-2.5 bg-amber-50 border border-amber-200 rounded-lg text-[10.5px] text-amber-800 flex items-start gap-2">
+            <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+            <span>
+              <strong>Nota:</strong> Exibindo funções de equipe padrão de obra. Você pode cadastrar o Quadro de Efetivos exclusivo desta obra no menu <strong>Gerenciar Obras</strong>.
+            </span>
+          </div>
+        )}
+
+        {/* Filters and Actions */}
+        <div className="py-3 flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 text-xs">
+          <div className="flex items-center gap-2">
+            <span className="font-bold text-[10px] text-slate-500 uppercase">Filtrar por Empresa:</span>
+            <select
+              value={filterEmpresa}
+              onChange={(e) => setFilterEmpresa(e.target.value)}
+              className="h-7 border border-slate-300 rounded px-2 text-xs bg-slate-50 font-medium outline-none"
+            >
+              <option value="TODAS">Todas as Empresas ({empresasList.length})</option>
+              {empresasList.map(emp => (
+                <option key={emp} value={emp}>{emp}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => handleToggleAll(true)}
+              className="text-[10px] font-bold text-amber-700 hover:underline cursor-pointer border-none bg-transparent"
+            >
+              Marcar Todos
+            </button>
+            <span className="text-slate-300">|</span>
+            <button
+              onClick={() => handleToggleAll(false)}
+              className="text-[10px] font-bold text-slate-500 hover:underline cursor-pointer border-none bg-transparent"
+            >
+              Desmarcar Todos
+            </button>
+          </div>
+        </div>
+
+        {/* Table of Members */}
+        <div className="flex-1 overflow-y-auto py-2 custom-scrollbar">
+          <table className="w-full text-left text-xs divide-y divide-slate-100">
+            <thead className="bg-slate-50 text-[9px] font-bold text-slate-500 uppercase sticky top-0">
+              <tr>
+                <th className="p-2 w-10 text-center">Sel.</th>
+                <th className="p-2">Empresa</th>
+                <th className="p-2">Cargo / Função</th>
+                <th className="p-2 text-center">Tipo</th>
+                <th className="p-2 text-center w-20">Cadastrado (C)</th>
+                <th className="p-2 text-center w-20">Faltas (F)</th>
+                <th className="p-2 text-center w-20">Atestado (A)</th>
+                <th className="p-2 text-center w-20">Presente (T)</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {quadroMembers
+                .filter(m => filterEmpresa === "TODAS" || m.empresa === filterEmpresa)
+                .map((m) => {
+                  const state = items[m.id] || { empresa: m.empresa, cargo: m.cargo, moiMod: m.moiMod, c: 1, f: 0, a: 0, selected: true };
+                  const totalPresente = Math.max(0, Number(state.c || 0) - Number(state.f || 0));
+
+                  return (
+                    <tr key={m.id} className={`hover:bg-slate-50/80 transition-colors ${state.selected ? "bg-amber-50/30" : ""}`}>
+                      <td className="p-2 text-center">
+                        <input
+                          type="checkbox"
+                          checked={state.selected}
+                          onChange={(e) => {
+                            setItems(prev => ({
+                              ...prev,
+                              [m.id]: { ...state, selected: e.target.checked }
+                            }));
+                          }}
+                          className="rounded border-slate-300 text-amber-600 focus:ring-amber-500 h-4 w-4 cursor-pointer"
+                        />
+                      </td>
+                      <td className="p-2 font-bold text-slate-700 text-[11px]">{m.empresa}</td>
+                      <td className="p-2 font-semibold text-slate-900">{m.cargo}</td>
+                      <td className="p-2 text-center">
+                        <span className={`px-1.5 py-0.5 rounded text-[8.5px] font-bold ${
+                          m.moiMod === "MOI" ? "bg-amber-100 text-amber-900" : "bg-sky-100 text-sky-900"
+                        }`}>
+                          {m.moiMod}
+                        </span>
+                      </td>
+                      <td className="p-2 text-center">
+                        <input
+                          type="number"
+                          min="0"
+                          value={state.c}
+                          disabled={!state.selected}
+                          onChange={(e) => {
+                            const val = Number(e.target.value);
+                            setItems(prev => ({
+                              ...prev,
+                              [m.id]: { ...state, c: val }
+                            }));
+                          }}
+                          className="w-14 h-7 text-center rounded border border-slate-300 font-bold bg-white focus:border-amber-500 outline-none"
+                        />
+                      </td>
+                      <td className="p-2 text-center">
+                        <input
+                          type="number"
+                          min="0"
+                          value={state.f}
+                          disabled={!state.selected}
+                          onChange={(e) => {
+                            const val = Number(e.target.value);
+                            setItems(prev => ({
+                              ...prev,
+                              [m.id]: { ...state, f: val }
+                            }));
+                          }}
+                          className="w-14 h-7 text-center rounded border border-slate-300 text-red-600 font-bold bg-white focus:border-amber-500 outline-none"
+                        />
+                      </td>
+                      <td className="p-2 text-center">
+                        <input
+                          type="number"
+                          min="0"
+                          value={state.a}
+                          disabled={!state.selected}
+                          onChange={(e) => {
+                            const val = Number(e.target.value);
+                            setItems(prev => ({
+                              ...prev,
+                              [m.id]: { ...state, a: val }
+                            }));
+                          }}
+                          className="w-14 h-7 text-center rounded border border-slate-300 text-amber-600 font-bold bg-white focus:border-amber-500 outline-none"
+                        />
+                      </td>
+                      <td className="p-2 text-center font-bold font-mono text-emerald-700 text-xs">
+                        {totalPresente}
+                      </td>
+                    </tr>
+                  );
+                })}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-between border-t border-slate-100 pt-3 mt-2">
+          <span className="text-[11px] text-slate-500 font-medium">
+            {Object.values(items).filter(i => i.selected).length} cargo(s) selecionado(s)
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onClose}
+              className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs uppercase tracking-wider transition-colors cursor-pointer border-none"
+            >
+              Cancelar
+            </button>
+            <button
+              onClick={handleConfirm}
+              className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl text-xs uppercase tracking-wider transition-colors cursor-pointer border-none shadow-sm"
+            >
+              Inserir Selecionados no RDO
+            </button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  );
+};
+
+// Item quantity parse/format helpers
+const parseItemQty = (formatted: string): { desc: string; qtd: number } => {
+  if (!formatted) return { desc: "", qtd: 1 };
+  const match = formatted.match(/^(\d+)x?\s+(.*)$/i) || formatted.match(/^(\d+)\s*-\s*(.*)$/i);
+  if (match) {
+    return { qtd: Math.max(1, parseInt(match[1], 10) || 1), desc: match[2].trim() };
+  }
+  return { desc: formatted.trim(), qtd: 1 };
+};
+
+const formatItemQty = (desc: string, qtd: number): string => {
+  if (qtd <= 1) return desc;
+  return `${qtd}x ${desc}`;
 };
 
 // Simple date text formater wrapper
@@ -2743,4 +3508,488 @@ const formatPrintDate = (dateStr: string): string => {
   const dateObj = new Date(dateStr + "T12:00:00");
   const options: Intl.DateTimeFormatOptions = { day: "2-digit", month: "2-digit", year: "numeric", weekday: "short" };
   return dateObj.toLocaleDateString("pt-BR", options);
+};
+
+/* =========================================================================
+ * Sub-modal: Labor Selection per Frente (With Quantities)
+ * ========================================================================= */
+interface LaborSelectionModalForFrenteProps {
+  isOpen: boolean;
+  onClose: () => void;
+  frenteNome: string;
+  currentSelectedDescs: string[];
+  efetivoDetalhado: CompanyLaborGroup[];
+  quadroMembers: ObraEfetivoMember[];
+  onConfirm: (selectedDescs: string[]) => void;
+}
+
+const LaborSelectionModalForFrente: React.FC<LaborSelectionModalForFrenteProps> = ({
+  isOpen,
+  onClose,
+  frenteNome,
+  currentSelectedDescs,
+  efetivoDetalhado,
+  quadroMembers,
+  onConfirm
+}) => {
+  const [searchTerm, setSearchTerm] = React.useState("");
+
+  // Gather candidate items
+  const candidates = React.useMemo(() => {
+    const list: string[] = [];
+
+    if (efetivoDetalhado && efetivoDetalhado.length > 0) {
+      efetivoDetalhado.forEach(g => {
+        g.items.forEach(itm => {
+          const formatted = `${itm.cargo}${g.nome ? ` (${g.nome})` : ""}`;
+          if (!list.includes(formatted)) list.push(formatted);
+        });
+      });
+    }
+
+    if (quadroMembers && quadroMembers.length > 0) {
+      quadroMembers.forEach(m => {
+        const formatted = `${m.cargo}${m.empresa ? ` (${m.empresa})` : ""}`;
+        if (!list.includes(formatted)) list.push(formatted);
+      });
+    }
+
+    if (list.length === 0) {
+      return [
+        "Engenheiro Residente / Coordenador",
+        "Técnico de Segurança do Trabalho (TST)",
+        "Encarregado Geral de Obra",
+        "Carpinteiro",
+        "Armador",
+        "Pedreiro",
+        "Ajudante Geral",
+        "Operador de Perfuratriz",
+        "Operador de Escavadeira",
+        "Sinaleiro / Rigor",
+        "Mecânico / Eletricista"
+      ];
+    }
+
+    return list;
+  }, [efetivoDetalhado, quadroMembers]);
+
+  // Quantity state map per candidate
+  const [qtyMap, setQtyMap] = React.useState<Record<string, number>>({});
+
+  React.useEffect(() => {
+    const initialMap: Record<string, number> = {};
+    candidates.forEach(item => {
+      initialMap[item] = 0;
+    });
+
+    currentSelectedDescs.forEach(rawStr => {
+      const { desc, qtd } = parseItemQty(rawStr);
+      const match = candidates.find(c => c.toLowerCase() === desc.toLowerCase()) || desc;
+      initialMap[match] = qtd > 0 ? qtd : 1;
+    });
+
+    setQtyMap(initialMap);
+  }, [candidates, currentSelectedDescs]);
+
+  if (!isOpen) return null;
+
+  const filteredCandidates = candidates.filter(c =>
+    c.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  const handleToggleAll = (val: boolean) => {
+    const updated = { ...qtyMap };
+    filteredCandidates.forEach(c => {
+      updated[c] = val ? (updated[c] > 0 ? updated[c] : 1) : 0;
+    });
+    setQtyMap(updated);
+  };
+
+  const handleConfirm = () => {
+    const result = candidates
+      .filter(c => (qtyMap[c] || 0) > 0)
+      .map(c => formatItemQty(c, qtyMap[c]));
+    onConfirm(result);
+  };
+
+  const selectedCount = Object.values(qtyMap).filter(v => v > 0).length;
+  const totalEfetivo = Object.values(qtyMap).reduce((acc, v) => acc + (v > 0 ? v : 0), 0);
+
+  return (
+    <div className="fixed inset-0 z-[9999] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in font-sans">
+      <div className="bg-white rounded-2xl border border-slate-100 p-5 max-w-xl w-full shadow-2xl flex flex-col max-h-[85vh]">
+        
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 bg-amber-50 text-amber-600 rounded-xl">
+              <Users className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="font-bold text-sm text-slate-900 uppercase tracking-wide">
+                Mão de Obra e Efetivo Parado
+              </h3>
+              <p className="text-[10px] text-slate-500">
+                Frente: <strong className="text-amber-800">{frenteNome || "Frente de Trabalho"}</strong>
+              </p>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-700 cursor-pointer border-none">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Search & Actions */}
+        <div className="py-2.5 flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 text-xs">
+          <input
+            type="text"
+            placeholder="Buscar cargo ou função..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="h-8 px-3 rounded-lg border border-slate-200 text-xs w-full sm:w-64 focus:outline-none focus:border-amber-500"
+          />
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => handleToggleAll(true)}
+              className="text-[10px] font-bold text-amber-700 hover:underline cursor-pointer border-none bg-transparent"
+            >
+              Marcar Todos (Qtd 1)
+            </button>
+            <span className="text-slate-300">|</span>
+            <button
+              onClick={() => handleToggleAll(false)}
+              className="text-[10px] font-bold text-slate-500 hover:underline cursor-pointer border-none bg-transparent"
+            >
+              Desmarcar
+            </button>
+          </div>
+        </div>
+
+        {/* Item List with Quantities */}
+        <div className="flex-1 overflow-y-auto py-2 divide-y divide-slate-100 custom-scrollbar">
+          {filteredCandidates.length > 0 ? (
+            filteredCandidates.map((c) => {
+              const currentQtd = qtyMap[c] || 0;
+              const isChecked = currentQtd > 0;
+              return (
+                <div
+                  key={c}
+                  className={`flex items-center justify-between p-2.5 rounded-lg transition-colors text-xs font-medium ${
+                    isChecked ? "bg-amber-50/70 text-amber-950" : "hover:bg-slate-50 text-slate-700"
+                  }`}
+                >
+                  <label className="flex items-center gap-2.5 cursor-pointer flex-1 mr-2">
+                    <input
+                      type="checkbox"
+                      checked={isChecked}
+                      onChange={(e) => {
+                        setQtyMap(prev => ({ ...prev, [c]: e.target.checked ? 1 : 0 }));
+                      }}
+                      className="rounded border-slate-300 text-amber-600 focus:ring-amber-500 h-4 w-4 cursor-pointer"
+                    />
+                    <span className={isChecked ? "font-bold text-slate-900" : ""}>{c}</span>
+                  </label>
+
+                  {/* Quantity Controls */}
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setQtyMap(prev => ({ ...prev, [c]: Math.max(0, (prev[c] || 0) - 1) }));
+                      }}
+                      disabled={currentQtd <= 0}
+                      className="w-7 h-7 rounded-lg border border-slate-200 bg-white hover:bg-amber-100 text-slate-700 font-bold flex items-center justify-center disabled:opacity-30 disabled:hover:bg-white cursor-pointer"
+                    >
+                      -
+                    </button>
+                    <input
+                      type="number"
+                      min={0}
+                      max={999}
+                      value={currentQtd}
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value, 10);
+                        setQtyMap(prev => ({ ...prev, [c]: isNaN(val) ? 0 : Math.max(0, val) }));
+                      }}
+                      className="w-12 h-7 rounded-lg border border-slate-300 text-center font-bold text-xs text-amber-950 focus:outline-none focus:border-amber-500 bg-white"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setQtyMap(prev => ({ ...prev, [c]: (prev[c] || 0) + 1 }));
+                      }}
+                      className="w-7 h-7 rounded-lg border border-slate-200 bg-white hover:bg-amber-100 text-slate-700 font-bold flex items-center justify-center cursor-pointer"
+                    >
+                      +
+                    </button>
+                  </div>
+                </div>
+              );
+            })
+          ) : (
+            <p className="text-xs text-slate-400 italic text-center py-6">Nenhum cargo encontrado para a busca.</p>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-between border-t border-slate-100 pt-3 mt-2">
+          <span className="text-[11px] text-slate-600 font-medium">
+            <strong>{selectedCount}</strong> cargo(s) selecionado(s) | Total de trabalhadores: <strong className="text-amber-700">{totalEfetivo}</strong>
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onClose}
+              className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs uppercase tracking-wider transition-colors cursor-pointer border-none"
+            >
+              Cancelar
+            </button>
+            <button
+              onClick={handleConfirm}
+              className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl text-xs uppercase tracking-wider transition-colors cursor-pointer border-none shadow-sm"
+            >
+              Confirmar Seleção
+            </button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  );
+};
+
+/* =========================================================================
+ * Sub-modal: Equipment Selection per Frente (With Quantities)
+ * ========================================================================= */
+interface EquipmentSelectionModalForFrenteProps {
+  isOpen: boolean;
+  onClose: () => void;
+  frenteNome: string;
+  currentSelectedDescs: string[];
+  equipamentosMobilizados: EquipmentMobilizedDetail[];
+  onConfirm: (selectedDescs: string[]) => void;
+}
+
+const EquipmentSelectionModalForFrente: React.FC<EquipmentSelectionModalForFrenteProps> = ({
+  isOpen,
+  onClose,
+  frenteNome,
+  currentSelectedDescs,
+  equipamentosMobilizados,
+  onConfirm
+}) => {
+  const [searchTerm, setSearchTerm] = React.useState("");
+
+  // Gather candidate items
+  const candidates = React.useMemo(() => {
+    const list: string[] = [];
+
+    if (equipamentosMobilizados && equipamentosMobilizados.length > 0) {
+      equipamentosMobilizados.forEach(eq => {
+        const formatted = `${eq.descricao}${eq.empresa ? ` (${eq.empresa})` : ""}`;
+        if (!list.includes(formatted)) list.push(formatted);
+      });
+    }
+
+    if (list.length === 0) {
+      return [
+        "Perfuratriz Hidráulica",
+        "Escavadeira Hidráulica CAT 320",
+        "Guindaste Telescópico",
+        "Caminhão Munck",
+        "Gerador de Energia Diesel",
+        "Compressor de Ar Portátil",
+        "Bomba de Injeção de Nata / Concreto",
+        "Mini Escavadeira",
+        "Retroescavadeira",
+        "Caminhão Basculante 14m³"
+      ];
+    }
+
+    return list;
+  }, [equipamentosMobilizados]);
+
+  // Quantity state map per candidate
+  const [qtyMap, setQtyMap] = React.useState<Record<string, number>>({});
+
+  React.useEffect(() => {
+    const initialMap: Record<string, number> = {};
+    candidates.forEach(item => {
+      initialMap[item] = 0;
+    });
+
+    currentSelectedDescs.forEach(rawStr => {
+      const { desc, qtd } = parseItemQty(rawStr);
+      const match = candidates.find(c => c.toLowerCase() === desc.toLowerCase()) || desc;
+      initialMap[match] = qtd > 0 ? qtd : 1;
+    });
+
+    setQtyMap(initialMap);
+  }, [candidates, currentSelectedDescs]);
+
+  if (!isOpen) return null;
+
+  const filteredCandidates = candidates.filter(c =>
+    c.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  const handleToggleAll = (val: boolean) => {
+    const updated = { ...qtyMap };
+    filteredCandidates.forEach(c => {
+      updated[c] = val ? (updated[c] > 0 ? updated[c] : 1) : 0;
+    });
+    setQtyMap(updated);
+  };
+
+  const handleConfirm = () => {
+    const result = candidates
+      .filter(c => (qtyMap[c] || 0) > 0)
+      .map(c => formatItemQty(c, qtyMap[c]));
+    onConfirm(result);
+  };
+
+  const selectedCount = Object.values(qtyMap).filter(v => v > 0).length;
+  const totalEquip = Object.values(qtyMap).reduce((acc, v) => acc + (v > 0 ? v : 0), 0);
+
+  return (
+    <div className="fixed inset-0 z-[9999] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in font-sans">
+      <div className="bg-white rounded-2xl border border-slate-100 p-5 max-w-xl w-full shadow-2xl flex flex-col max-h-[85vh]">
+        
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 bg-sky-50 text-sky-600 rounded-xl">
+              <Wrench className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="font-bold text-sm text-slate-900 uppercase tracking-wide">
+                Equipamentos Mobilizados Parados
+              </h3>
+              <p className="text-[10px] text-slate-500">
+                Frente: <strong className="text-sky-800">{frenteNome || "Frente de Trabalho"}</strong>
+              </p>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-700 cursor-pointer border-none">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Search & Actions */}
+        <div className="py-2.5 flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 text-xs">
+          <input
+            type="text"
+            placeholder="Buscar equipamento..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="h-8 px-3 rounded-lg border border-slate-200 text-xs w-full sm:w-64 focus:outline-none focus:border-sky-500"
+          />
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => handleToggleAll(true)}
+              className="text-[10px] font-bold text-sky-700 hover:underline cursor-pointer border-none bg-transparent"
+            >
+              Marcar Todos (Qtd 1)
+            </button>
+            <span className="text-slate-300">|</span>
+            <button
+              onClick={() => handleToggleAll(false)}
+              className="text-[10px] font-bold text-slate-500 hover:underline cursor-pointer border-none bg-transparent"
+            >
+              Desmarcar
+            </button>
+          </div>
+        </div>
+
+        {/* Item List with Quantities */}
+        <div className="flex-1 overflow-y-auto py-2 divide-y divide-slate-100 custom-scrollbar">
+          {filteredCandidates.length > 0 ? (
+            filteredCandidates.map((c) => {
+              const currentQtd = qtyMap[c] || 0;
+              const isChecked = currentQtd > 0;
+              return (
+                <div
+                  key={c}
+                  className={`flex items-center justify-between p-2.5 rounded-lg transition-colors text-xs font-medium ${
+                    isChecked ? "bg-sky-50/70 text-sky-950" : "hover:bg-slate-50 text-slate-700"
+                  }`}
+                >
+                  <label className="flex items-center gap-2.5 cursor-pointer flex-1 mr-2">
+                    <input
+                      type="checkbox"
+                      checked={isChecked}
+                      onChange={(e) => {
+                        setQtyMap(prev => ({ ...prev, [c]: e.target.checked ? 1 : 0 }));
+                      }}
+                      className="rounded border-slate-300 text-sky-600 focus:ring-sky-500 h-4 w-4 cursor-pointer"
+                    />
+                    <span className={isChecked ? "font-bold text-slate-900" : ""}>{c}</span>
+                  </label>
+
+                  {/* Quantity Controls */}
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setQtyMap(prev => ({ ...prev, [c]: Math.max(0, (prev[c] || 0) - 1) }));
+                      }}
+                      disabled={currentQtd <= 0}
+                      className="w-7 h-7 rounded-lg border border-slate-200 bg-white hover:bg-sky-100 text-slate-700 font-bold flex items-center justify-center disabled:opacity-30 disabled:hover:bg-white cursor-pointer"
+                    >
+                      -
+                    </button>
+                    <input
+                      type="number"
+                      min={0}
+                      max={999}
+                      value={currentQtd}
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value, 10);
+                        setQtyMap(prev => ({ ...prev, [c]: isNaN(val) ? 0 : Math.max(0, val) }));
+                      }}
+                      className="w-12 h-7 rounded-lg border border-slate-300 text-center font-bold text-xs text-sky-950 focus:outline-none focus:border-sky-500 bg-white"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setQtyMap(prev => ({ ...prev, [c]: (prev[c] || 0) + 1 }));
+                      }}
+                      className="w-7 h-7 rounded-lg border border-slate-200 bg-white hover:bg-sky-100 text-slate-700 font-bold flex items-center justify-center cursor-pointer"
+                    >
+                      +
+                    </button>
+                  </div>
+                </div>
+              );
+            })
+          ) : (
+            <p className="text-xs text-slate-400 italic text-center py-6">Nenhum equipamento encontrado para a busca.</p>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-between border-t border-slate-100 pt-3 mt-2">
+          <span className="text-[11px] text-slate-600 font-medium">
+            <strong>{selectedCount}</strong> tipo(s) selecionado(s) | Total de equipamentos: <strong className="text-sky-700">{totalEquip}</strong>
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onClose}
+              className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs uppercase tracking-wider transition-colors cursor-pointer border-none"
+            >
+              Cancelar
+            </button>
+            <button
+              onClick={handleConfirm}
+              className="px-4 py-2 bg-sky-700 hover:bg-sky-800 text-white font-bold rounded-xl text-xs uppercase tracking-wider transition-colors cursor-pointer border-none shadow-sm"
+            >
+              Confirmar Seleção
+            </button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  );
 };

@@ -47,10 +47,22 @@ export const HOURS_LIST = [
   "0h", "1h", "2h", "3h", "4h", "5h"
 ];
 
+export interface StoppageFrenteItem {
+  id: string;
+  nome: string;
+  pqItemId?: string;
+  pqItemDesc?: string;
+  maoDeObraIds?: string[];
+  maoDeObraDescs?: string[];
+  equipamentoIds?: string[];
+  equipamentoDescs?: string[];
+}
+
 export interface StoppageDetailRow {
   ativo: boolean;
   horas: string[]; // array of strings like "14h", "15h" etc.
   frentes: string;
+  frentesItems?: StoppageFrenteItem[];
   local: string;
   maoDeObraParalisada: string;
   comentarios: string;
@@ -185,6 +197,14 @@ export interface AuditLog {
   timestamp: string;
 }
 
+export interface ObraEfetivoMember {
+  id: string;
+  empresa: string;
+  cargo: string;
+  moiMod: "MOI" | "MOD";
+  cadastradosPadrao?: number;
+}
+
 export interface ObraConfig {
   id?: string;
   userId: string;
@@ -200,6 +220,7 @@ export interface ObraConfig {
   logoSeel?: string; // base64
   atividades: ObraActivity[]; // PQ catalogue
   subcontratadas: string[]; // list of companies
+  quadroEfetivos?: ObraEfetivoMember[]; // Quadro de Efetivos cadastrado na Obra
   permissoes: ObraPermission[];
   
   // Default Signers Configured per Obra

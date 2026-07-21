@@ -583,9 +583,8 @@ const SingleReportPrint: React.FC<{ report: RdoReport }> = ({ report }) => {
                   <thead>
                     <tr className="bg-gray-50 border-b border-gray-300 text-[7px] text-gray-500">
                       <th className="p-1 border-r border-gray-200 w-16">CATEGORIA</th>
-                      <th className="p-1 border-r border-gray-200">JANELA DE HORAS PARALISADAS (6H ÀS 5H DO DIA SEGUINTE)</th>
-                      <th className="p-1 border-r border-gray-200 w-24">FRENTES AFETADAS</th>
-                      <th className="p-1 border-r border-gray-200 w-20">EQUIPES AFETADAS</th>
+                      <th className="p-1 border-r border-gray-200">JANELA DE HORAS PARALISADAS E NOTAS EXPLICATIVAS</th>
+                      <th className="p-1 border-r border-gray-200 w-48">FRENTES, MÃO DE OBRA E EQUIPAMENTOS PARADOS</th>
                       <th className="p-1 w-12 text-center">TOTAL</th>
                     </tr>
                   </thead>
@@ -611,14 +610,40 @@ const SingleReportPrint: React.FC<{ report: RdoReport }> = ({ report }) => {
                               )}
                             </div>
                             {row.comentarios && (
-                              <p className="text-[7.5px] italic text-[#004899] mt-0.5">Nota: {row.comentarios}</p>
+                              <p className="text-[7.5px] italic text-[#004899] mt-1 bg-slate-50 p-1 rounded border border-slate-200/60 leading-tight">
+                                <strong className="not-italic text-slate-700">Notas: </strong>{row.comentarios}
+                              </p>
                             )}
                           </td>
-                          <td className="p-1 border-r border-gray-300 text-gray-600 truncate max-w-[120px]">
-                            {row.ativo ? row.frentes || "Todas" : "-"}
-                          </td>
-                          <td className="p-1 border-r border-gray-300 text-gray-600 truncate max-w-[100px]">
-                            {row.ativo ? row.maoDeObraParalisada || "Toda equipe" : "-"}
+                          <td className="p-1 border-r border-gray-300 text-gray-600 max-w-[180px] leading-tight">
+                            {row.ativo ? (
+                              row.frentesItems && row.frentesItems.length > 0 ? (
+                                <div className="space-y-1">
+                                  {row.frentesItems.map((f, fi) => (
+                                    <div key={f.id || fi} className="text-[7.5px] border-b border-gray-100 last:border-b-0 pb-0.5">
+                                      <span className="font-semibold text-gray-800">• {f.nome || "Frente sem nome"}</span>
+                                      {f.pqItemDesc && (
+                                        <span className="block text-[7px] text-[#004899] font-mono pl-1.5 truncate">
+                                          PQ: {f.pqItemDesc}
+                                        </span>
+                                      )}
+                                      {f.maoDeObraDescs && f.maoDeObraDescs.length > 0 && (
+                                        <span className="block text-[7px] text-amber-900 font-medium pl-1.5">
+                                          M.O. Parada: {f.maoDeObraDescs.join(", ")}
+                                        </span>
+                                      )}
+                                      {f.equipamentoDescs && f.equipamentoDescs.length > 0 && (
+                                        <span className="block text-[7px] text-sky-900 font-medium pl-1.5">
+                                          Equip. Parados: {f.equipamentoDescs.join(", ")}
+                                        </span>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                row.frentes || "Todas"
+                              )
+                            ) : "-"}
                           </td>
                           <td className="p-1 text-center font-bold text-red-600 font-mono">
                             {row.ativo ? row.total || "0h" : "0h"}
