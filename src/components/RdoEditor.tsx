@@ -447,6 +447,18 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
     });
   };
 
+  // Helper: Sort labor group items (MOI first, MOD second, alphabetical by cargo)
+  const sortLaborGroupItems = (items: LaborDetailItem[]): LaborDetailItem[] => {
+    return [...items].sort((a, b) => {
+      const typeA = a.moiMod === "MOI" ? 0 : 1;
+      const typeB = b.moiMod === "MOI" ? 0 : 1;
+      if (typeA !== typeB) return typeA - typeB;
+      const cargoA = (a.cargo || "").trim();
+      const cargoB = (b.cargo || "").trim();
+      return cargoA.localeCompare(cargoB, "pt-BR");
+    });
+  };
+
   // Detailed Labor Operations
   const handleUpdateLaborItem = (groupIndex: number, itemIndex: number, fields: Partial<any>) => {
     const updatedGrid = [...currentReport.efetivoDetalhado];
@@ -460,7 +472,7 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
     }
 
     items[itemIndex] = currentItem;
-    group.items = items;
+    group.items = sortLaborGroupItems(items);
     updatedGrid[groupIndex] = group;
     // update report state
     updateReport({ efetivoDetalhado: updatedGrid });
@@ -478,7 +490,7 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
       t: 0,
       moiMod: "MOD" as const
     };
-    group.items = [...group.items, newItem];
+    group.items = sortLaborGroupItems([...group.items, newItem]);
     updatedGrid[groupIndex] = group;
     updateReport({ efetivoDetalhado: updatedGrid });
   };
@@ -486,7 +498,7 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
   const handleDeleteLaborRow = (groupIndex: number, itemIndex: number) => {
     const updatedGrid = [...currentReport.efetivoDetalhado];
     const group = { ...updatedGrid[groupIndex] };
-    group.items = group.items.filter((_, i) => i !== itemIndex);
+    group.items = sortLaborGroupItems(group.items.filter((_, i) => i !== itemIndex));
     updatedGrid[groupIndex] = group;
     updateReport({ efetivoDetalhado: updatedGrid });
   };
@@ -501,7 +513,7 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
     const newGroup = {
       id: "sub-gp-" + Date.now() + "-" + Math.random().toString(36).substr(2, 5),
       nome: name.trim().toUpperCase(),
-      items: [
+      items: sortLaborGroupItems([
         {
           id: "labor-itm-" + Date.now() + "-1",
           cargo: "Servante / Auxiliar Técnico",
@@ -511,7 +523,7 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
           t: 0,
           moiMod: "MOD" as const
         }
-      ]
+      ])
     };
     updateReport({
       efetivoDetalhado: [...currentReport.efetivoDetalhado, newGroup]
@@ -566,10 +578,12 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
     const secureClonedLabor = clonedLabor.map((group: any) => ({
       ...group,
       id: "labor-group-" + Math.random().toString(36).substring(2, 9) + Date.now(),
-      items: (group.items || []).map((itm: any) => ({
-        ...itm,
-        id: "labor-itm-" + Math.random().toString(36).substring(2, 9) + Date.now()
-      }))
+      items: sortLaborGroupItems(
+        (group.items || []).map((itm: any) => ({
+          ...itm,
+          id: "labor-itm-" + Math.random().toString(36).substring(2, 9) + Date.now()
+        }))
+      )
     }));
 
     let computedMoi = 0;
@@ -1956,66 +1970,130 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-150">
-                      {group.items.map((item, iIdx) => (
-                        <tr key={item.id} className="hover:bg-slate-50/50">
-                          <td className="p-1.5">
-                            <input
-                              type="text"
-                              value={item.cargo}
-                              onChange={(e) => handleUpdateLaborItem(gIdx, iIdx, { cargo: e.target.value })}
-                              className="h-8 w-full rounded border-slate-300 text-xs text-slate-800 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 bg-slate-50/10 hover:bg-slate-50/50 transition-colors"
-                            />
-                          </td>
-                          <td className="p-1.5 text-center">
-                            <select
-                              value={item.moiMod}
-                              onChange={(e) => handleUpdateLaborItem(gIdx, iIdx, { moiMod: e.target.value })}
-                              className="h-8 rounded border-slate-300 text-xs text-slate-850 py-0.5 w-full focus:border-amber-500 focus:ring-1 focus:ring-amber-500 bg-slate-50/10 cursor-pointer"
-                            >
-                              <option value="MOD">Direct (MOD)</option>
-                              <option value="MOI">Indirect (MOI)</option>
-                            </select>
-                          </td>
-                          <td className="p-1.5 text-center">
-                            <input
-                              type="number"
-                              min="0"
-                              value={item.c}
-                              onChange={(e) => handleUpdateLaborItem(gIdx, iIdx, { c: Number(e.target.value) })}
-                              className="h-8 w-16 text-center font-mono rounded border-slate-300 text-xs text-slate-800 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 bg-slate-50/10"
-                            />
-                          </td>
-                          <td className="p-1.5 text-center">
-                            <input
-                              type="number"
-                              min="0"
-                              value={item.f}
-                              onChange={(e) => handleUpdateLaborItem(gIdx, iIdx, { f: Number(e.target.value) })}
-                              className="h-8 w-16 text-center font-mono rounded border-slate-300 text-xs text-slate-800 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 bg-slate-50/10"
-                            />
-                          </td>
-                          <td className="p-1.5 text-center">
-                            <input
-                              type="number"
-                              min="0"
-                              value={item.a}
-                              onChange={(e) => handleUpdateLaborItem(gIdx, iIdx, { a: Number(e.target.value) })}
-                              className="h-8 w-16 text-center font-mono rounded border-slate-300 text-xs text-slate-800 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 bg-slate-50/10"
-                            />
-                          </td>
-                          <td className="p-1.5 text-center font-bold font-mono text-slate-800 bg-slate-100">
-                            {item.t}
-                          </td>
-                          <td className="p-1.5 text-center">
-                            <button
-                              onClick={() => handleDeleteLaborRow(gIdx, iIdx)}
-                              className="text-red-500 hover:text-red-700 p-1.5 bg-red-50 hover:bg-red-100 transition-colors rounded cursor-pointer"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
+                      {(() => {
+                        const sortedItems = sortLaborGroupItems(group.items);
+                        const moiItems = sortedItems.filter(i => i.moiMod === "MOI");
+                        const modItems = sortedItems.filter(i => i.moiMod !== "MOI");
+
+                        const renderRow = (item: LaborDetailItem, iIdx: number) => (
+                          <tr key={item.id} className="hover:bg-slate-50/50">
+                            <td className="p-1.5">
+                              <input
+                                type="text"
+                                value={item.cargo}
+                                onChange={(e) => handleUpdateLaborItem(gIdx, iIdx, { cargo: e.target.value })}
+                                className="h-8 w-full rounded border-slate-300 text-xs text-slate-800 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 bg-slate-50/10 hover:bg-slate-50/50 transition-colors"
+                              />
+                            </td>
+                            <td className="p-1.5 text-center">
+                              <select
+                                value={item.moiMod}
+                                onChange={(e) => handleUpdateLaborItem(gIdx, iIdx, { moiMod: e.target.value })}
+                                className="h-8 rounded border-slate-300 text-xs text-slate-850 py-0.5 w-full focus:border-amber-500 focus:ring-1 focus:ring-amber-500 bg-slate-50/10 cursor-pointer"
+                              >
+                                <option value="MOD">Direct (MOD)</option>
+                                <option value="MOI">Indirect (MOI)</option>
+                              </select>
+                            </td>
+                            <td className="p-1.5 text-center">
+                              <input
+                                type="number"
+                                min="0"
+                                value={item.c}
+                                onChange={(e) => handleUpdateLaborItem(gIdx, iIdx, { c: Number(e.target.value) })}
+                                className="h-8 w-16 text-center font-mono rounded border-slate-300 text-xs text-slate-800 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 bg-slate-50/10"
+                              />
+                            </td>
+                            <td className="p-1.5 text-center">
+                              <input
+                                type="number"
+                                min="0"
+                                value={item.f}
+                                onChange={(e) => handleUpdateLaborItem(gIdx, iIdx, { f: Number(e.target.value) })}
+                                className="h-8 w-16 text-center font-mono rounded border-slate-300 text-xs text-slate-800 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 bg-slate-50/10"
+                              />
+                            </td>
+                            <td className="p-1.5 text-center">
+                              <input
+                                type="number"
+                                min="0"
+                                value={item.a}
+                                onChange={(e) => handleUpdateLaborItem(gIdx, iIdx, { a: Number(e.target.value) })}
+                                className="h-8 w-16 text-center font-mono rounded border-slate-300 text-xs text-slate-800 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 bg-slate-50/10"
+                              />
+                            </td>
+                            <td className="p-1.5 text-center font-bold font-mono text-slate-800 bg-slate-100">
+                              {item.t}
+                            </td>
+                            <td className="p-1.5 text-center">
+                              <button
+                                onClick={() => handleDeleteLaborRow(gIdx, iIdx)}
+                                className="text-red-500 hover:text-red-700 p-1.5 bg-red-50 hover:bg-red-100 transition-colors rounded cursor-pointer"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </td>
+                          </tr>
+                        );
+
+                        return (
+                          <>
+                            {/* MOI HEADER */}
+                            <tr className="bg-amber-100/70 border-y border-amber-200/80 text-amber-950 font-bold uppercase text-[9px]">
+                              <td colSpan={7} className="px-3 py-1.5">
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="px-1.5 py-0.5 bg-amber-600 text-white rounded text-[8px] font-black">MOI</span>
+                                    <span>Mão de Obra Indireta (MOI) - {moiItems.length} função(ões)</span>
+                                  </div>
+                                  <span className="font-mono text-[9.5px] text-amber-900 font-extrabold">
+                                    {moiItems.reduce((acc, it) => acc + (it.t || 0), 0)} presente(s)
+                                  </span>
+                                </div>
+                              </td>
+                            </tr>
+                            {moiItems.length > 0 ? (
+                              moiItems.map((item) => {
+                                const realIdx = group.items.findIndex(it => it.id === item.id);
+                                return renderRow(item, realIdx !== -1 ? realIdx : 0);
+                              })
+                            ) : (
+                              <tr>
+                                <td colSpan={7} className="px-3 py-1.5 text-center text-slate-400 italic text-[10px]">
+                                  Nenhuma função MOI nesta empresa.
+                                </td>
+                              </tr>
+                            )}
+
+                            {/* MOD HEADER */}
+                            <tr className="bg-sky-100/70 border-y border-sky-200/80 text-sky-950 font-bold uppercase text-[9px]">
+                              <td colSpan={7} className="px-3 py-1.5">
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="px-1.5 py-0.5 bg-sky-600 text-white rounded text-[8px] font-black">MOD</span>
+                                    <span>Mão de Obra Direta (MOD) - {modItems.length} função(ões)</span>
+                                  </div>
+                                  <span className="font-mono text-[9.5px] text-sky-900 font-extrabold">
+                                    {modItems.reduce((acc, it) => acc + (it.t || 0), 0)} presente(s)
+                                  </span>
+                                </div>
+                              </td>
+                            </tr>
+                            {modItems.length > 0 ? (
+                              modItems.map((item) => {
+                                const realIdx = group.items.findIndex(it => it.id === item.id);
+                                return renderRow(item, realIdx !== -1 ? realIdx : 0);
+                              })
+                            ) : (
+                              <tr>
+                                <td colSpan={7} className="px-3 py-1.5 text-center text-slate-400 italic text-[10px]">
+                                  Nenhuma função MOD nesta empresa.
+                                </td>
+                              </tr>
+                            )}
+                          </>
+                        );
+                      })()}
                     </tbody>
                   </table>
                   </div>
@@ -3389,9 +3467,20 @@ const EfetivoSelectionModal: React.FC<EfetivoSelectionModalProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {quadroMembers
-                .filter(m => filterEmpresa === "TODAS" || m.empresa === filterEmpresa)
-                .map((m) => {
+              {(() => {
+                const filtered = quadroMembers
+                  .filter(m => filterEmpresa === "TODAS" || m.empresa === filterEmpresa)
+                  .sort((a, b) => {
+                    const typeA = a.moiMod === "MOI" ? 0 : 1;
+                    const typeB = b.moiMod === "MOI" ? 0 : 1;
+                    if (typeA !== typeB) return typeA - typeB;
+                    return a.cargo.localeCompare(b.cargo, "pt-BR");
+                  });
+
+                const moiList = filtered.filter(m => m.moiMod === "MOI");
+                const modList = filtered.filter(m => m.moiMod !== "MOI");
+
+                const renderMemberRow = (m: ObraEfetivoMember) => {
                   const state = items[m.id] || { empresa: m.empresa, cargo: m.cargo, moiMod: m.moiMod, c: 1, f: 0, a: 0, selected: true };
                   const totalPresente = Math.max(0, Number(state.c || 0) - Number(state.f || 0));
 
@@ -3472,7 +3561,50 @@ const EfetivoSelectionModal: React.FC<EfetivoSelectionModalProps> = ({
                       </td>
                     </tr>
                   );
-                })}
+                };
+
+                return (
+                  <>
+                    {/* MOI SECTION */}
+                    <tr className="bg-amber-100/80 border-y border-amber-300/80 text-amber-950 font-bold uppercase text-[9px]">
+                      <td colSpan={8} className="px-3 py-1.5 flex items-center justify-between">
+                        <div className="flex items-center gap-1.5">
+                          <span className="px-1.5 py-0.5 bg-amber-600 text-white rounded text-[8px] font-black">MOI</span>
+                          <span>Mão de Obra Indireta (MOI) - {moiList.length} função(ões)</span>
+                        </div>
+                      </td>
+                    </tr>
+                    {moiList.length > 0 ? (
+                      moiList.map(m => renderMemberRow(m))
+                    ) : (
+                      <tr>
+                        <td colSpan={8} className="p-2 text-center text-slate-400 italic text-[10px]">
+                          Nenhum cargo de MOI encontrado.
+                        </td>
+                      </tr>
+                    )}
+
+                    {/* MOD SECTION */}
+                    <tr className="bg-sky-100/80 border-y border-sky-300/80 text-sky-950 font-bold uppercase text-[9px]">
+                      <td colSpan={8} className="px-3 py-1.5 flex items-center justify-between">
+                        <div className="flex items-center gap-1.5">
+                          <span className="px-1.5 py-0.5 bg-sky-600 text-white rounded text-[8px] font-black">MOD</span>
+                          <span>Mão de Obra Direta (MOD) - {modList.length} função(ões)</span>
+                        </div>
+                      </td>
+                    </tr>
+                    {modList.length > 0 ? (
+                      modList.map(m => renderMemberRow(m))
+                    ) : (
+                      <tr>
+                        <td colSpan={8} className="p-2 text-center text-slate-400 italic text-[10px]">
+                          Nenhum cargo de MOD encontrado.
+                        </td>
+                      </tr>
+                    )}
+                  </>
+                );
+              })()}
             </tbody>
           </table>
         </div>
@@ -3705,7 +3837,47 @@ const LaborSelectionModalForFrente: React.FC<LaborSelectionModalForFrenteProps> 
 }) => {
   const [searchTerm, setSearchTerm] = React.useState("");
 
-  // Gather candidate items
+  // Helper to determine if a candidate string belongs to MOI or MOD
+  const getCandidateMoiMod = React.useCallback((cStr: string): "MOI" | "MOD" => {
+    const { name, empresa } = parseCandidateKey(cStr);
+    if (efetivoDetalhado && efetivoDetalhado.length > 0) {
+      for (const g of efetivoDetalhado) {
+        if (!empresa || (g.nome || "").trim().toLowerCase() === empresa.toLowerCase()) {
+          const item = g.items.find(i => (i.cargo || "").trim().toLowerCase() === name.toLowerCase());
+          if (item && item.moiMod) return item.moiMod;
+        }
+      }
+    }
+    if (quadroMembers && quadroMembers.length > 0) {
+      for (const m of quadroMembers) {
+        if ((m.cargo || "").trim().toLowerCase() === name.toLowerCase()) {
+          if (m.moiMod) return m.moiMod;
+        }
+      }
+    }
+    const lower = name.toLowerCase();
+    if (
+      lower.includes("engenheiro") ||
+      lower.includes("coordenador") ||
+      lower.includes("técnico") ||
+      lower.includes("tecnico") ||
+      lower.includes("tst") ||
+      lower.includes("encarregado") ||
+      lower.includes("mestre") ||
+      lower.includes("almoxarife") ||
+      lower.includes("topógrafo") ||
+      lower.includes("topografo") ||
+      lower.includes("apontador") ||
+      lower.includes("supervisor") ||
+      lower.includes("administrativo") ||
+      lower.includes("gerente")
+    ) {
+      return "MOI";
+    }
+    return "MOD";
+  }, [efetivoDetalhado, quadroMembers]);
+
+  // Gather candidate items sorted MOI first, MOD second, then alphabetically
   const candidates = React.useMemo(() => {
     const list: string[] = [];
 
@@ -3726,7 +3898,7 @@ const LaborSelectionModalForFrente: React.FC<LaborSelectionModalForFrenteProps> 
     }
 
     if (list.length === 0) {
-      return [
+      list.push(
         "Engenheiro Residente / Coordenador",
         "Técnico de Segurança do Trabalho (TST)",
         "Encarregado Geral de Obra",
@@ -3738,11 +3910,16 @@ const LaborSelectionModalForFrente: React.FC<LaborSelectionModalForFrenteProps> 
         "Operador de Escavadeira",
         "Sinaleiro / Rigor",
         "Mecânico / Eletricista"
-      ];
+      );
     }
 
-    return list;
-  }, [efetivoDetalhado, quadroMembers]);
+    return list.sort((a, b) => {
+      const typeA = getCandidateMoiMod(a) === "MOI" ? 0 : 1;
+      const typeB = getCandidateMoiMod(b) === "MOI" ? 0 : 1;
+      if (typeA !== typeB) return typeA - typeB;
+      return a.localeCompare(b, "pt-BR");
+    });
+  }, [efetivoDetalhado, quadroMembers, getCandidateMoiMod]);
 
   // Quantity state map per candidate
   const [qtyMap, setQtyMap] = React.useState<Record<string, number>>({});
@@ -3846,11 +4023,20 @@ const LaborSelectionModalForFrente: React.FC<LaborSelectionModalForFrenteProps> 
 
         {/* Item List with Quantities & Safety Limits */}
         <div className="flex-1 overflow-y-auto py-2 divide-y divide-slate-100 custom-scrollbar">
-          {filteredCandidates.length > 0 ? (
-            filteredCandidates.map((c) => {
+          {(() => {
+            if (filteredCandidates.length === 0) {
+              return <p className="text-xs text-slate-400 italic text-center py-6">Nenhum cargo encontrado para a busca.</p>;
+            }
+
+            const moiCandidates = filteredCandidates.filter(c => getCandidateMoiMod(c) === "MOI");
+            const modCandidates = filteredCandidates.filter(c => getCandidateMoiMod(c) !== "MOI");
+
+            const renderCandidateRow = (c: string) => {
               const { totalRegistered, allocatedInOthers, maxAllowed } = getLaborMaxLimit(c, currentReport, catKey, fIdx, quadroMembers);
               const currentQtd = qtyMap[c] || 0;
               const isChecked = currentQtd > 0;
+              const type = getCandidateMoiMod(c);
+
               return (
                 <div
                   key={c}
@@ -3873,7 +4059,14 @@ const LaborSelectionModalForFrente: React.FC<LaborSelectionModalForFrenteProps> 
                       className="rounded border-slate-300 text-amber-600 focus:ring-amber-500 h-4 w-4 cursor-pointer disabled:opacity-40"
                     />
                     <div className="flex flex-col">
-                      <span className={isChecked ? "font-bold text-slate-900" : ""}>{c}</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className={`px-1.5 py-0.2 rounded text-[8px] font-bold ${
+                          type === "MOI" ? "bg-amber-100 text-amber-900 border border-amber-300/60" : "bg-sky-100 text-sky-900 border border-sky-300/60"
+                        }`}>
+                          {type}
+                        </span>
+                        <span className={isChecked ? "font-bold text-slate-900" : ""}>{c}</span>
+                      </div>
                       <div className="flex items-center gap-1.5 mt-0.5">
                         {maxAllowed > 0 ? (
                           <span className="text-[9.5px] font-mono text-amber-900 bg-amber-100/90 px-1.5 py-0.2 rounded border border-amber-300/60 font-semibold">
@@ -3936,10 +4129,38 @@ const LaborSelectionModalForFrente: React.FC<LaborSelectionModalForFrenteProps> 
                   </div>
                 </div>
               );
-            })
-          ) : (
-            <p className="text-xs text-slate-400 italic text-center py-6">Nenhum cargo encontrado para a busca.</p>
-          )}
+            };
+
+            return (
+              <>
+                {/* MOI SECTION */}
+                <div className="bg-amber-100/80 px-3 py-1.5 rounded-md my-1 font-bold text-[9px] uppercase tracking-wider text-amber-950 flex items-center justify-between border border-amber-200">
+                  <div className="flex items-center gap-1.5">
+                    <span className="px-1.5 py-0.5 bg-amber-600 text-white rounded text-[8px] font-black">MOI</span>
+                    <span>Mão de Obra Indireta (MOI) - {moiCandidates.length} função(ões)</span>
+                  </div>
+                </div>
+                {moiCandidates.length > 0 ? (
+                  moiCandidates.map(c => renderCandidateRow(c))
+                ) : (
+                  <p className="text-[11px] text-slate-400 italic px-3 py-2 text-center">Nenhum cargo MOI encontrado.</p>
+                )}
+
+                {/* MOD SECTION */}
+                <div className="bg-sky-100/80 px-3 py-1.5 rounded-md my-1 font-bold text-[9px] uppercase tracking-wider text-sky-950 flex items-center justify-between border border-sky-200">
+                  <div className="flex items-center gap-1.5">
+                    <span className="px-1.5 py-0.5 bg-sky-600 text-white rounded text-[8px] font-black">MOD</span>
+                    <span>Mão de Obra Direta (MOD) - {modCandidates.length} função(ões)</span>
+                  </div>
+                </div>
+                {modCandidates.length > 0 ? (
+                  modCandidates.map(c => renderCandidateRow(c))
+                ) : (
+                  <p className="text-[11px] text-slate-400 italic px-3 py-2 text-center">Nenhum cargo MOD encontrado.</p>
+                )}
+              </>
+            );
+          })()}
         </div>
 
         {/* Footer */}

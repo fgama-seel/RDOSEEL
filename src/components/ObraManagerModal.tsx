@@ -344,6 +344,26 @@ export const ObraManagerModal: React.FC<ObraManagerModalProps> = ({ isOpen, onCl
     });
   };
 
+  // Quadro de Efetivos auto-sorting helper (MOI first, MOD second, alphabetical by cargo)
+  const sortQuadroEfetivos = (list: ObraEfetivoMember[]): ObraEfetivoMember[] => {
+    return [...list].sort((a, b) => {
+      // Primary: empresa
+      const empA = (a.empresa || "").trim();
+      const empB = (b.empresa || "").trim();
+      if (empA !== empB) return empA.localeCompare(empB, "pt-BR");
+
+      // Secondary: MOI before MOD
+      const typeA = a.moiMod === "MOI" ? 0 : 1;
+      const typeB = b.moiMod === "MOI" ? 0 : 1;
+      if (typeA !== typeB) return typeA - typeB;
+
+      // Tertiary: cargo
+      const cargoA = (a.cargo || "").trim();
+      const cargoB = (b.cargo || "").trim();
+      return cargoA.localeCompare(cargoB, "pt-BR");
+    });
+  };
+
   // Quadro de Efetivos handlers
   const handleAddQuadroEfetivoMember = () => {
     if (!newEfetivoCargo.trim()) {
@@ -357,7 +377,7 @@ export const ObraManagerModal: React.FC<ObraManagerModalProps> = ({ isOpen, onCl
       moiMod: newEfetivoMoiMod,
       cadastradosPadrao: Math.max(1, Number(newEfetivoCadastrados || 1))
     };
-    setQuadroEfetivos([...quadroEfetivos, newMember]);
+    setQuadroEfetivos(prev => sortQuadroEfetivos([...prev, newMember]));
     setNewEfetivoCargo("");
     setNewEfetivoCadastrados(1);
   };
@@ -377,7 +397,7 @@ export const ObraManagerModal: React.FC<ObraManagerModalProps> = ({ isOpen, onCl
       { id: "efet-7", empresa: contratada || "SEEL SERVIÇOS DE ENGENHARIA LTDA", cargo: "Ajudante Geral de Obra", moiMod: "MOD", cadastradosPadrao: 4 },
       { id: "efet-8", empresa: contratada || "SEEL SERVIÇOS DE ENGENHARIA LTDA", cargo: "Operador de Máquinas / Equipamentos", moiMod: "MOD", cadastradosPadrao: 1 }
     ];
-    setQuadroEfetivos(prev => [...prev, ...defaultRoles]);
+    setQuadroEfetivos(prev => sortQuadroEfetivos([...prev, ...defaultRoles]));
     setMessage({ text: "Funções padrão de obra inseridas no Quadro de Efetivos com sucesso!", type: "success" });
   };
 
@@ -1109,32 +1129,91 @@ export const ObraManagerModal: React.FC<ObraManagerModalProps> = ({ isOpen, onCl
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-200 bg-white">
-                    {quadroEfetivos.length > 0 ? (
-                      quadroEfetivos.map((mem) => (
-                        <tr key={mem.id} className="hover:bg-slate-50">
-                          <td className="px-3.5 py-2 font-semibold text-slate-700">{mem.empresa}</td>
-                          <td className="px-3.5 py-2 font-medium text-slate-900">{mem.cargo}</td>
-                          <td className="px-3.5 py-2 text-center">
-                            <span className={`px-2 py-0.5 rounded text-[9px] font-bold ${
-                              mem.moiMod === "MOI" 
-                                ? "bg-amber-100 text-amber-900 border border-amber-300" 
-                                : "bg-sky-100 text-sky-900 border border-sky-300"
-                            }`}>
-                              {mem.moiMod === "MOI" ? "INDIRETA (MOI)" : "DIRETA (MOD)"}
-                            </span>
-                          </td>
-                          <td className="px-3.5 py-2 text-right">
-                            <button
-                              onClick={() => handleRemoveQuadroEfetivoMember(mem.id)}
-                              className="text-red-500 hover:text-red-700 font-bold p-1 hover:bg-red-50 rounded transition-colors"
-                              title="Remover função"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </td>
-                        </tr>
-                      ))
-                    ) : (
+                    {quadroEfetivos.length > 0 ? (() => {
+                      const sorted = sortQuadroEfetivos(quadroEfetivos);
+                      const moiList = sorted.filter(m => m.moiMod === "MOI");
+                      const modList = sorted.filter(m => m.moiMod !== "MOI");
+
+                      return (
+                        <>
+                          {/* MOI SECTION */}
+                          <tr className="bg-amber-100/80 border-y border-amber-300/80 text-amber-950 font-bold uppercase text-[9.5px]">
+                            <td colSpan={4} className="px-3.5 py-1.5 flex items-center justify-between">
+                              <div className="flex items-center gap-1.5">
+                                <span className="px-1.5 py-0.5 bg-amber-600 text-white rounded text-[8.5px] font-black">MOI</span>
+                                <span>Mão de Obra Indireta (MOI) - {moiList.length} função(ões)</span>
+                              </div>
+                            </td>
+                          </tr>
+                          {moiList.length > 0 ? (
+                            moiList.map((mem) => (
+                              <tr key={mem.id} className="hover:bg-amber-50/30">
+                                <td className="px-3.5 py-2 font-semibold text-slate-700">{mem.empresa}</td>
+                                <td className="px-3.5 py-2 font-medium text-slate-900">{mem.cargo}</td>
+                                <td className="px-3.5 py-2 text-center">
+                                  <span className="px-2 py-0.5 rounded text-[9px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                                    INDIRETA (MOI)
+                                  </span>
+                                </td>
+                                <td className="px-3.5 py-2 text-right">
+                                  <button
+                                    onClick={() => handleRemoveQuadroEfetivoMember(mem.id)}
+                                    className="text-red-500 hover:text-red-700 font-bold p-1 hover:bg-red-50 rounded transition-colors cursor-pointer"
+                                    title="Remover função"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </td>
+                              </tr>
+                            ))
+                          ) : (
+                            <tr>
+                              <td colSpan={4} className="px-3.5 py-2 text-center text-slate-400 italic text-[10px]">
+                                Nenhuma função de Mão de Obra Indireta (MOI).
+                              </td>
+                            </tr>
+                          )}
+
+                          {/* MOD SECTION */}
+                          <tr className="bg-sky-100/80 border-y border-sky-300/80 text-sky-950 font-bold uppercase text-[9.5px]">
+                            <td colSpan={4} className="px-3.5 py-1.5 flex items-center justify-between">
+                              <div className="flex items-center gap-1.5">
+                                <span className="px-1.5 py-0.5 bg-sky-600 text-white rounded text-[8.5px] font-black">MOD</span>
+                                <span>Mão de Obra Direta (MOD) - {modList.length} função(ões)</span>
+                              </div>
+                            </td>
+                          </tr>
+                          {modList.length > 0 ? (
+                            modList.map((mem) => (
+                              <tr key={mem.id} className="hover:bg-sky-50/30">
+                                <td className="px-3.5 py-2 font-semibold text-slate-700">{mem.empresa}</td>
+                                <td className="px-3.5 py-2 font-medium text-slate-900">{mem.cargo}</td>
+                                <td className="px-3.5 py-2 text-center">
+                                  <span className="px-2 py-0.5 rounded text-[9px] font-bold bg-sky-100 text-sky-900 border border-sky-300">
+                                    DIRETA (MOD)
+                                  </span>
+                                </td>
+                                <td className="px-3.5 py-2 text-right">
+                                  <button
+                                    onClick={() => handleRemoveQuadroEfetivoMember(mem.id)}
+                                    className="text-red-500 hover:text-red-700 font-bold p-1 hover:bg-red-50 rounded transition-colors cursor-pointer"
+                                    title="Remover função"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </td>
+                              </tr>
+                            ))
+                          ) : (
+                            <tr>
+                              <td colSpan={4} className="px-3.5 py-2 text-center text-slate-400 italic text-[10px]">
+                                Nenhuma função de Mão de Obra Direta (MOD).
+                              </td>
+                            </tr>
+                          )}
+                        </>
+                      );
+                    })() : (
                       <tr>
                         <td colSpan={4} className="px-3.5 py-6 text-center text-slate-400 italic">
                           Nenhum cargo/função cadastrado ainda. Adicione acima ou clique em "Gerar Cargos Padrão" para preenchimento rápido.
