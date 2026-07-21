@@ -1660,6 +1660,11 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
                                                   type="button"
                                                   title="Aumentar quantidade"
                                                   onClick={() => {
+                                                    const { maxAllowed, totalRegistered } = getLaborMaxLimit(cleanDesc, currentReport, catKey, fIdx, associatedObra?.quadroEfetivos);
+                                                    if (qtd >= maxAllowed) {
+                                                      alert(`Trava de Segurança: Não é possível ultrapassar a quantidade cadastrada na aba Quadro de Efetivo.\n\nLimite máximo disponível para "${cleanDesc}": ${maxAllowed} (Total cadastrado/presente: ${totalRegistered}).`);
+                                                      return;
+                                                    }
                                                     const newQtd = qtd + 1;
                                                     const updatedDescs = [...item.maoDeObraDescs!];
                                                     updatedDescs[dIdx] = formatItemQty(cleanDesc, newQtd);
@@ -1735,6 +1740,11 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
                                                   type="button"
                                                   title="Aumentar quantidade"
                                                   onClick={() => {
+                                                    const { maxAllowed, totalMobilized } = getEquipmentMaxLimit(cleanDesc, currentReport, catKey, fIdx);
+                                                    if (qtd >= maxAllowed) {
+                                                      alert(`Trava de Segurança: Não é possível ultrapassar a quantidade mobilizada na aba Equipamentos.\n\nLimite máximo disponível para "${cleanDesc}": ${maxAllowed} (Total mobilizado no RDO: ${totalMobilized}).`);
+                                                      return;
+                                                    }
                                                     const newQtd = qtd + 1;
                                                     const updatedDescs = [...item.equipamentoDescs!];
                                                     updatedDescs[dIdx] = formatItemQty(cleanDesc, newQtd);
@@ -3158,6 +3168,9 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
               currentSelectedDescs={frenteItem.maoDeObraDescs || []}
               efetivoDetalhado={currentReport.efetivoDetalhado || []}
               quadroMembers={associatedObra?.quadroEfetivos || []}
+              currentReport={currentReport}
+              catKey={laborPickerTarget.catKey}
+              fIdx={laborPickerTarget.fIdx}
               onConfirm={(selectedDescs) => {
                 const currentFrentes = [...(rowVal.frentesItems || [])];
                 if (currentFrentes[laborPickerTarget.fIdx]) {
@@ -3189,6 +3202,9 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
               frenteNome={frenteItem.nome || "Frente de Serviço"}
               currentSelectedDescs={frenteItem.equipamentoDescs || []}
               equipamentosMobilizados={currentReport.equipamentosDetalhado || []}
+              currentReport={currentReport}
+              catKey={equipPickerTarget.catKey}
+              fIdx={equipPickerTarget.fIdx}
               onConfirm={(selectedDescs) => {
                 const currentFrentes = [...(rowVal.frentesItems || [])];
                 if (currentFrentes[equipPickerTarget.fIdx]) {
@@ -3502,6 +3518,155 @@ const formatItemQty = (desc: string, qtd: number): string => {
   return `${qtd}x ${desc}`;
 };
 
+// Helper: parse string to extract name and company e.g., "Carpinteiro (SEEL)" -> { name: "carpinteiro", empresa: "seel" }
+const parseCandidateKey = (str: string) => {
+  const match = str.match(/^(.*?)\s*\((.*?)\)$/);
+  if (match) {
+    return { name: match[1].trim().toLowerCase(), empresa: match[2].trim().toLowerCase() };
+  }
+  return { name: str.trim().toLowerCase(), empresa: "" };
+};
+
+// Helper: Calculate max labor allowed based on Quadro de Efetivo tab
+const getLaborMaxLimit = (
+  candidateStr: string,
+  currentReport: RdoReport,
+  excludeCatKey?: string,
+  excludeFIdx?: number,
+  quadroMembers?: ObraEfetivoMember[]
+) => {
+  const candidateKey = parseCandidateKey(candidateStr);
+
+  let totalRegistered = 0;
+  const efList = currentReport.efetivoDetalhado || [];
+
+  if (efList.length > 0) {
+    efList.forEach(g => {
+      const gName = (g.nome || "").trim().toLowerCase();
+      g.items.forEach(itm => {
+        const cName = (itm.cargo || "").trim().toLowerCase();
+        
+        let isMatch = false;
+        if (candidateKey.empresa) {
+          isMatch = cName === candidateKey.name && gName === candidateKey.empresa;
+        } else {
+          isMatch = cName === candidateKey.name;
+        }
+
+        if (isMatch) {
+          const regVal = typeof itm.t === "number" && itm.t >= 0 ? itm.t : Math.max(0, (itm.c || 0) - (itm.f || 0) - (itm.a || 0));
+          totalRegistered += Math.max(regVal, itm.c || 0);
+        }
+      });
+    });
+  } else if (quadroMembers && quadroMembers.length > 0) {
+    quadroMembers.forEach(m => {
+      const cName = (m.cargo || "").trim().toLowerCase();
+      const mEmpresa = (m.empresa || "").trim().toLowerCase();
+
+      let isMatch = false;
+      if (candidateKey.empresa) {
+        isMatch = cName === candidateKey.name && mEmpresa === candidateKey.empresa;
+      } else {
+        isMatch = cName === candidateKey.name;
+      }
+
+      if (isMatch) {
+        totalRegistered += (m.cadastradosPadrao || 1);
+      }
+    });
+  }
+
+  let allocatedInOthers = 0;
+  const paralisacoes = currentReport.paralisacoesDetalhe || {};
+
+  Object.entries(paralisacoes).forEach(([cKey, catObj]) => {
+    const row = catObj as { frentesItems?: Array<{ maoDeObraDescs?: string[]; equipamentoDescs?: string[] }> } | undefined;
+    if (!row || !row.frentesItems) return;
+    row.frentesItems.forEach((f, idx) => {
+      if (cKey === excludeCatKey && idx === excludeFIdx) return;
+
+      (f.maoDeObraDescs || []).forEach(rawDesc => {
+        const { desc, qtd } = parseItemQty(rawDesc);
+        const itemKey = parseCandidateKey(desc);
+
+        let isMatch = false;
+        if (candidateKey.empresa && itemKey.empresa) {
+          isMatch = itemKey.name === candidateKey.name && itemKey.empresa === candidateKey.empresa;
+        } else {
+          isMatch = itemKey.name === candidateKey.name;
+        }
+
+        if (isMatch) {
+          allocatedInOthers += qtd;
+        }
+      });
+    });
+  });
+
+  const maxAllowed = Math.max(0, totalRegistered - allocatedInOthers);
+  return { totalRegistered, allocatedInOthers, maxAllowed };
+};
+
+// Helper: Calculate max equipment allowed based on Equipamentos tab
+const getEquipmentMaxLimit = (
+  candidateStr: string,
+  currentReport: RdoReport,
+  excludeCatKey?: string,
+  excludeFIdx?: number
+) => {
+  const candidateKey = parseCandidateKey(candidateStr);
+
+  let totalMobilized = 0;
+  const eqList = currentReport.equipamentosDetalhado || [];
+
+  eqList.forEach(eq => {
+    const eqDesc = (eq.descricao || "").trim().toLowerCase();
+    const eqEmpresa = (eq.empresa || "").trim().toLowerCase();
+
+    let isMatch = false;
+    if (candidateKey.empresa) {
+      isMatch = eqDesc === candidateKey.name && eqEmpresa === candidateKey.empresa;
+    } else {
+      isMatch = eqDesc === candidateKey.name;
+    }
+
+    if (isMatch) {
+      totalMobilized += (eq.quantidade || 0);
+    }
+  });
+
+  let allocatedInOthers = 0;
+  const paralisacoes = currentReport.paralisacoesDetalhe || {};
+
+  Object.entries(paralisacoes).forEach(([cKey, catObj]) => {
+    const row = catObj as { frentesItems?: Array<{ maoDeObraDescs?: string[]; equipamentoDescs?: string[] }> } | undefined;
+    if (!row || !row.frentesItems) return;
+    row.frentesItems.forEach((f, idx) => {
+      if (cKey === excludeCatKey && idx === excludeFIdx) return;
+
+      (f.equipamentoDescs || []).forEach(rawDesc => {
+        const { desc, qtd } = parseItemQty(rawDesc);
+        const itemKey = parseCandidateKey(desc);
+
+        let isMatch = false;
+        if (candidateKey.empresa && itemKey.empresa) {
+          isMatch = itemKey.name === candidateKey.name && itemKey.empresa === candidateKey.empresa;
+        } else {
+          isMatch = itemKey.name === candidateKey.name;
+        }
+
+        if (isMatch) {
+          allocatedInOthers += qtd;
+        }
+      });
+    });
+  });
+
+  const maxAllowed = Math.max(0, totalMobilized - allocatedInOthers);
+  return { totalMobilized, allocatedInOthers, maxAllowed };
+};
+
 // Simple date text formater wrapper
 const formatPrintDate = (dateStr: string): string => {
   if (!dateStr) return "-";
@@ -3511,7 +3676,7 @@ const formatPrintDate = (dateStr: string): string => {
 };
 
 /* =========================================================================
- * Sub-modal: Labor Selection per Frente (With Quantities)
+ * Sub-modal: Labor Selection per Frente (With Quantities & Capacity Locking)
  * ========================================================================= */
 interface LaborSelectionModalForFrenteProps {
   isOpen: boolean;
@@ -3520,6 +3685,9 @@ interface LaborSelectionModalForFrenteProps {
   currentSelectedDescs: string[];
   efetivoDetalhado: CompanyLaborGroup[];
   quadroMembers: ObraEfetivoMember[];
+  currentReport: RdoReport;
+  catKey: string;
+  fIdx: number;
   onConfirm: (selectedDescs: string[]) => void;
 }
 
@@ -3530,6 +3698,9 @@ const LaborSelectionModalForFrente: React.FC<LaborSelectionModalForFrenteProps> 
   currentSelectedDescs,
   efetivoDetalhado,
   quadroMembers,
+  currentReport,
+  catKey,
+  fIdx,
   onConfirm
 }) => {
   const [searchTerm, setSearchTerm] = React.useState("");
@@ -3585,11 +3756,13 @@ const LaborSelectionModalForFrente: React.FC<LaborSelectionModalForFrenteProps> 
     currentSelectedDescs.forEach(rawStr => {
       const { desc, qtd } = parseItemQty(rawStr);
       const match = candidates.find(c => c.toLowerCase() === desc.toLowerCase()) || desc;
-      initialMap[match] = qtd > 0 ? qtd : 1;
+      const { maxAllowed } = getLaborMaxLimit(match, currentReport, catKey, fIdx, quadroMembers);
+      const wanted = qtd > 0 ? qtd : 1;
+      initialMap[match] = Math.min(maxAllowed, wanted);
     });
 
     setQtyMap(initialMap);
-  }, [candidates, currentSelectedDescs]);
+  }, [candidates, currentSelectedDescs, currentReport, catKey, fIdx, quadroMembers]);
 
   if (!isOpen) return null;
 
@@ -3600,7 +3773,12 @@ const LaborSelectionModalForFrente: React.FC<LaborSelectionModalForFrenteProps> 
   const handleToggleAll = (val: boolean) => {
     const updated = { ...qtyMap };
     filteredCandidates.forEach(c => {
-      updated[c] = val ? (updated[c] > 0 ? updated[c] : 1) : 0;
+      const { maxAllowed } = getLaborMaxLimit(c, currentReport, catKey, fIdx, quadroMembers);
+      if (val) {
+        updated[c] = Math.min(maxAllowed, updated[c] > 0 ? updated[c] : 1);
+      } else {
+        updated[c] = 0;
+      }
     });
     setQtyMap(updated);
   };
@@ -3654,7 +3832,7 @@ const LaborSelectionModalForFrente: React.FC<LaborSelectionModalForFrenteProps> 
               onClick={() => handleToggleAll(true)}
               className="text-[10px] font-bold text-amber-700 hover:underline cursor-pointer border-none bg-transparent"
             >
-              Marcar Todos (Qtd 1)
+              Marcar Todos (Respeitando Limite)
             </button>
             <span className="text-slate-300">|</span>
             <button
@@ -3666,10 +3844,11 @@ const LaborSelectionModalForFrente: React.FC<LaborSelectionModalForFrenteProps> 
           </div>
         </div>
 
-        {/* Item List with Quantities */}
+        {/* Item List with Quantities & Safety Limits */}
         <div className="flex-1 overflow-y-auto py-2 divide-y divide-slate-100 custom-scrollbar">
           {filteredCandidates.length > 0 ? (
             filteredCandidates.map((c) => {
+              const { totalRegistered, allocatedInOthers, maxAllowed } = getLaborMaxLimit(c, currentReport, catKey, fIdx, quadroMembers);
               const currentQtd = qtyMap[c] || 0;
               const isChecked = currentQtd > 0;
               return (
@@ -3677,18 +3856,37 @@ const LaborSelectionModalForFrente: React.FC<LaborSelectionModalForFrenteProps> 
                   key={c}
                   className={`flex items-center justify-between p-2.5 rounded-lg transition-colors text-xs font-medium ${
                     isChecked ? "bg-amber-50/70 text-amber-950" : "hover:bg-slate-50 text-slate-700"
-                  }`}
+                  } ${maxAllowed === 0 ? "opacity-75 bg-slate-50/40" : ""}`}
                 >
                   <label className="flex items-center gap-2.5 cursor-pointer flex-1 mr-2">
                     <input
                       type="checkbox"
                       checked={isChecked}
+                      disabled={maxAllowed === 0}
                       onChange={(e) => {
-                        setQtyMap(prev => ({ ...prev, [c]: e.target.checked ? 1 : 0 }));
+                        if (e.target.checked && maxAllowed === 0) {
+                          alert(`Não é possível selecionar "${c}". É necessário ter essa função cadastrada na aba "Quadro de Efetivo" (Disponível: 0, Total cadastrado: ${totalRegistered}).`);
+                          return;
+                        }
+                        setQtyMap(prev => ({ ...prev, [c]: e.target.checked ? Math.min(1, maxAllowed) : 0 }));
                       }}
-                      className="rounded border-slate-300 text-amber-600 focus:ring-amber-500 h-4 w-4 cursor-pointer"
+                      className="rounded border-slate-300 text-amber-600 focus:ring-amber-500 h-4 w-4 cursor-pointer disabled:opacity-40"
                     />
-                    <span className={isChecked ? "font-bold text-slate-900" : ""}>{c}</span>
+                    <div className="flex flex-col">
+                      <span className={isChecked ? "font-bold text-slate-900" : ""}>{c}</span>
+                      <div className="flex items-center gap-1.5 mt-0.5">
+                        {maxAllowed > 0 ? (
+                          <span className="text-[9.5px] font-mono text-amber-900 bg-amber-100/90 px-1.5 py-0.2 rounded border border-amber-300/60 font-semibold">
+                            Cadastrado: {totalRegistered} | Disponível: <strong>{maxAllowed}</strong>
+                            {allocatedInOthers > 0 && ` (${allocatedInOthers} alocado(s) em outras frentes)`}
+                          </span>
+                        ) : (
+                          <span className="text-[9.5px] font-mono text-red-700 bg-red-50 px-1.5 py-0.2 rounded border border-red-200 font-bold">
+                            {totalRegistered === 0 ? "0 cadastrado na aba Efetivo" : `Limite esgotado (${allocatedInOthers}/${totalRegistered} alocados em outras frentes)`}
+                          </span>
+                        )}
+                      </div>
+                    </div>
                   </label>
 
                   {/* Quantity Controls */}
@@ -3706,20 +3904,32 @@ const LaborSelectionModalForFrente: React.FC<LaborSelectionModalForFrenteProps> 
                     <input
                       type="number"
                       min={0}
-                      max={999}
+                      max={maxAllowed}
                       value={currentQtd}
+                      disabled={maxAllowed === 0}
                       onChange={(e) => {
                         const val = parseInt(e.target.value, 10);
-                        setQtyMap(prev => ({ ...prev, [c]: isNaN(val) ? 0 : Math.max(0, val) }));
+                        const numVal = isNaN(val) ? 0 : Math.max(0, val);
+                        if (numVal > maxAllowed) {
+                          alert(`Trava de Segurança: A quantidade de "${c}" não pode exceder ${maxAllowed} (Total cadastrado: ${totalRegistered}).`);
+                          setQtyMap(prev => ({ ...prev, [c]: maxAllowed }));
+                        } else {
+                          setQtyMap(prev => ({ ...prev, [c]: numVal }));
+                        }
                       }}
-                      className="w-12 h-7 rounded-lg border border-slate-300 text-center font-bold text-xs text-amber-950 focus:outline-none focus:border-amber-500 bg-white"
+                      className="w-12 h-7 rounded-lg border border-slate-300 text-center font-bold text-xs text-amber-950 focus:outline-none focus:border-amber-500 bg-white disabled:bg-slate-100 disabled:text-slate-400"
                     />
                     <button
                       type="button"
                       onClick={() => {
+                        if (currentQtd >= maxAllowed) {
+                          alert(`Trava de Segurança: Não é possível colocar mais equipe do que o cadastrado na aba de Efetivo.\n\nLimite máximo disponível para "${c}": ${maxAllowed} (Total cadastrado: ${totalRegistered}).`);
+                          return;
+                        }
                         setQtyMap(prev => ({ ...prev, [c]: (prev[c] || 0) + 1 }));
                       }}
-                      className="w-7 h-7 rounded-lg border border-slate-200 bg-white hover:bg-amber-100 text-slate-700 font-bold flex items-center justify-center cursor-pointer"
+                      disabled={currentQtd >= maxAllowed || maxAllowed === 0}
+                      className="w-7 h-7 rounded-lg border border-slate-200 bg-white hover:bg-amber-100 text-slate-700 font-bold flex items-center justify-center cursor-pointer disabled:opacity-30 disabled:hover:bg-white"
                     >
                       +
                     </button>
@@ -3759,7 +3969,7 @@ const LaborSelectionModalForFrente: React.FC<LaborSelectionModalForFrenteProps> 
 };
 
 /* =========================================================================
- * Sub-modal: Equipment Selection per Frente (With Quantities)
+ * Sub-modal: Equipment Selection per Frente (With Quantities & Capacity Locking)
  * ========================================================================= */
 interface EquipmentSelectionModalForFrenteProps {
   isOpen: boolean;
@@ -3767,6 +3977,9 @@ interface EquipmentSelectionModalForFrenteProps {
   frenteNome: string;
   currentSelectedDescs: string[];
   equipamentosMobilizados: EquipmentMobilizedDetail[];
+  currentReport: RdoReport;
+  catKey: string;
+  fIdx: number;
   onConfirm: (selectedDescs: string[]) => void;
 }
 
@@ -3776,6 +3989,9 @@ const EquipmentSelectionModalForFrente: React.FC<EquipmentSelectionModalForFrent
   frenteNome,
   currentSelectedDescs,
   equipamentosMobilizados,
+  currentReport,
+  catKey,
+  fIdx,
   onConfirm
 }) => {
   const [searchTerm, setSearchTerm] = React.useState("");
@@ -3821,11 +4037,13 @@ const EquipmentSelectionModalForFrente: React.FC<EquipmentSelectionModalForFrent
     currentSelectedDescs.forEach(rawStr => {
       const { desc, qtd } = parseItemQty(rawStr);
       const match = candidates.find(c => c.toLowerCase() === desc.toLowerCase()) || desc;
-      initialMap[match] = qtd > 0 ? qtd : 1;
+      const { maxAllowed } = getEquipmentMaxLimit(match, currentReport, catKey, fIdx);
+      const wanted = qtd > 0 ? qtd : 1;
+      initialMap[match] = Math.min(maxAllowed, wanted);
     });
 
     setQtyMap(initialMap);
-  }, [candidates, currentSelectedDescs]);
+  }, [candidates, currentSelectedDescs, currentReport, catKey, fIdx]);
 
   if (!isOpen) return null;
 
@@ -3836,7 +4054,12 @@ const EquipmentSelectionModalForFrente: React.FC<EquipmentSelectionModalForFrent
   const handleToggleAll = (val: boolean) => {
     const updated = { ...qtyMap };
     filteredCandidates.forEach(c => {
-      updated[c] = val ? (updated[c] > 0 ? updated[c] : 1) : 0;
+      const { maxAllowed } = getEquipmentMaxLimit(c, currentReport, catKey, fIdx);
+      if (val) {
+        updated[c] = Math.min(maxAllowed, updated[c] > 0 ? updated[c] : 1);
+      } else {
+        updated[c] = 0;
+      }
     });
     setQtyMap(updated);
   };
@@ -3890,7 +4113,7 @@ const EquipmentSelectionModalForFrente: React.FC<EquipmentSelectionModalForFrent
               onClick={() => handleToggleAll(true)}
               className="text-[10px] font-bold text-sky-700 hover:underline cursor-pointer border-none bg-transparent"
             >
-              Marcar Todos (Qtd 1)
+              Marcar Todos (Respeitando Limite)
             </button>
             <span className="text-slate-300">|</span>
             <button
@@ -3902,10 +4125,11 @@ const EquipmentSelectionModalForFrente: React.FC<EquipmentSelectionModalForFrent
           </div>
         </div>
 
-        {/* Item List with Quantities */}
+        {/* Item List with Quantities & Capacity Locking */}
         <div className="flex-1 overflow-y-auto py-2 divide-y divide-slate-100 custom-scrollbar">
           {filteredCandidates.length > 0 ? (
             filteredCandidates.map((c) => {
+              const { totalMobilized, allocatedInOthers, maxAllowed } = getEquipmentMaxLimit(c, currentReport, catKey, fIdx);
               const currentQtd = qtyMap[c] || 0;
               const isChecked = currentQtd > 0;
               return (
@@ -3913,18 +4137,37 @@ const EquipmentSelectionModalForFrente: React.FC<EquipmentSelectionModalForFrent
                   key={c}
                   className={`flex items-center justify-between p-2.5 rounded-lg transition-colors text-xs font-medium ${
                     isChecked ? "bg-sky-50/70 text-sky-950" : "hover:bg-slate-50 text-slate-700"
-                  }`}
+                  } ${maxAllowed === 0 ? "opacity-75 bg-slate-50/40" : ""}`}
                 >
                   <label className="flex items-center gap-2.5 cursor-pointer flex-1 mr-2">
                     <input
                       type="checkbox"
                       checked={isChecked}
+                      disabled={maxAllowed === 0}
                       onChange={(e) => {
-                        setQtyMap(prev => ({ ...prev, [c]: e.target.checked ? 1 : 0 }));
+                        if (e.target.checked && maxAllowed === 0) {
+                          alert(`Não é possível selecionar "${c}". É necessário ter este equipamento cadastrado na aba "Equipamentos" (Disponível: 0, Mobilizado: ${totalMobilized}).`);
+                          return;
+                        }
+                        setQtyMap(prev => ({ ...prev, [c]: e.target.checked ? Math.min(1, maxAllowed) : 0 }));
                       }}
-                      className="rounded border-slate-300 text-sky-600 focus:ring-sky-500 h-4 w-4 cursor-pointer"
+                      className="rounded border-slate-300 text-sky-600 focus:ring-sky-500 h-4 w-4 cursor-pointer disabled:opacity-40"
                     />
-                    <span className={isChecked ? "font-bold text-slate-900" : ""}>{c}</span>
+                    <div className="flex flex-col">
+                      <span className={isChecked ? "font-bold text-slate-900" : ""}>{c}</span>
+                      <div className="flex items-center gap-1.5 mt-0.5">
+                        {maxAllowed > 0 ? (
+                          <span className="text-[9.5px] font-mono text-sky-900 bg-sky-100/90 px-1.5 py-0.2 rounded border border-sky-300/60 font-semibold">
+                            Mobilizado: {totalMobilized} | Disponível: <strong>{maxAllowed}</strong>
+                            {allocatedInOthers > 0 && ` (${allocatedInOthers} alocado(s) em outras frentes)`}
+                          </span>
+                        ) : (
+                          <span className="text-[9.5px] font-mono text-red-700 bg-red-50 px-1.5 py-0.2 rounded border border-red-200 font-bold">
+                            {totalMobilized === 0 ? "0 mobilizado na aba Equipamentos" : `Limite esgotado (${allocatedInOthers}/${totalMobilized} alocados em outras frentes)`}
+                          </span>
+                        )}
+                      </div>
+                    </div>
                   </label>
 
                   {/* Quantity Controls */}
@@ -3942,20 +4185,32 @@ const EquipmentSelectionModalForFrente: React.FC<EquipmentSelectionModalForFrent
                     <input
                       type="number"
                       min={0}
-                      max={999}
+                      max={maxAllowed}
                       value={currentQtd}
+                      disabled={maxAllowed === 0}
                       onChange={(e) => {
                         const val = parseInt(e.target.value, 10);
-                        setQtyMap(prev => ({ ...prev, [c]: isNaN(val) ? 0 : Math.max(0, val) }));
+                        const numVal = isNaN(val) ? 0 : Math.max(0, val);
+                        if (numVal > maxAllowed) {
+                          alert(`Trava de Segurança: A quantidade de "${c}" não pode exceder ${maxAllowed} (Total mobilizado: ${totalMobilized}).`);
+                          setQtyMap(prev => ({ ...prev, [c]: maxAllowed }));
+                        } else {
+                          setQtyMap(prev => ({ ...prev, [c]: numVal }));
+                        }
                       }}
-                      className="w-12 h-7 rounded-lg border border-slate-300 text-center font-bold text-xs text-sky-950 focus:outline-none focus:border-sky-500 bg-white"
+                      className="w-12 h-7 rounded-lg border border-slate-300 text-center font-bold text-xs text-sky-950 focus:outline-none focus:border-sky-500 bg-white disabled:bg-slate-100 disabled:text-slate-400"
                     />
                     <button
                       type="button"
                       onClick={() => {
+                        if (currentQtd >= maxAllowed) {
+                          alert(`Trava de Segurança: Não é possível colocar mais equipamentos do que o mobilizado na aba Equipamentos.\n\nLimite máximo disponível para "${c}": ${maxAllowed} (Total mobilizado: ${totalMobilized}).`);
+                          return;
+                        }
                         setQtyMap(prev => ({ ...prev, [c]: (prev[c] || 0) + 1 }));
                       }}
-                      className="w-7 h-7 rounded-lg border border-slate-200 bg-white hover:bg-sky-100 text-slate-700 font-bold flex items-center justify-center cursor-pointer"
+                      disabled={currentQtd >= maxAllowed || maxAllowed === 0}
+                      className="w-7 h-7 rounded-lg border border-slate-200 bg-white hover:bg-sky-100 text-slate-700 font-bold flex items-center justify-center cursor-pointer disabled:opacity-30 disabled:hover:bg-white"
                     >
                       +
                     </button>
@@ -3982,7 +4237,7 @@ const EquipmentSelectionModalForFrente: React.FC<EquipmentSelectionModalForFrent
             </button>
             <button
               onClick={handleConfirm}
-              className="px-4 py-2 bg-sky-700 hover:bg-sky-800 text-white font-bold rounded-xl text-xs uppercase tracking-wider transition-colors cursor-pointer border-none shadow-sm"
+              className="px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white font-bold rounded-xl text-xs uppercase tracking-wider transition-colors cursor-pointer border-none shadow-sm"
             >
               Confirmar Seleção
             </button>
