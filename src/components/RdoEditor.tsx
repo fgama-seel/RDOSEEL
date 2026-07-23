@@ -8,6 +8,7 @@ import {
   RdoReport, 
   Activity, 
   CompanyLaborGroup, 
+  LaborDetailItem,
   EquipmentMobilizedDetail, 
   StoppageDetailRow,
   StoppageFrenteItem,
@@ -2566,6 +2567,85 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
                 />
               </div>
             </fieldset>
+
+            {/* SEÇÃO 3: COMENTÁRIOS DA CONTRATADA */}
+            {(() => {
+              const isCommentsValidated = Boolean(
+                currentReport.fiscalizacaoFinalizada ||
+                currentReport.gerenciadoraFinalizada ||
+                (currentReport.comentariosFiscalizacao && currentReport.comentariosFiscalizacao.length > 0) ||
+                (currentReport.comentariosGerenciadoraContratante && currentReport.comentariosGerenciadoraContratante.length > 0) ||
+                (currentReport.comentariosGerenciadora && currentReport.comentariosGerenciadora.length > 0) ||
+                currentReport.status === "Finalizado" ||
+                currentReport.status === "Assinado"
+              );
+
+              return (
+                <fieldset disabled={isReadOnly || currentReport.status === "Cancelado"} className={`space-y-4 border-t border-slate-200 pt-5 mt-2 ${isCommentsValidated ? 'bg-amber-50/20 p-4 rounded-xl border border-amber-200/80 shadow-2xs' : ''}`}>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2">
+                      <span>Comentários da Contratada</span>
+                      {isCommentsValidated ? (
+                        <span className="text-[9px] bg-emerald-100 text-emerald-800 border border-emerald-300 px-2 py-0.5 rounded-full font-bold">
+                          ✓ Liberado para Resposta
+                        </span>
+                      ) : (
+                        <span className="text-[9px] bg-slate-100 text-slate-600 border border-slate-200 px-2 py-0.5 rounded-full font-bold">
+                          Aguardando Validação da Fiscalização / Gerenciadora
+                        </span>
+                      )}
+                    </h3>
+
+                    {isEditor && isCommentsValidated && (
+                      <button
+                        onClick={async () => {
+                          try {
+                            setSaving(true);
+                            await saveReport(currentReport);
+                            setSaveSuccess(true);
+                            setTimeout(() => setSaveSuccess(false), 3000);
+                            alert("Resposta da Contratada salva com sucesso!");
+                          } catch (err) {
+                            console.error(err);
+                            alert("Erro ao salvar comentários da Contratada.");
+                          } finally {
+                            setSaving(false);
+                          }
+                        }}
+                        className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-[10px] font-bold uppercase tracking-wider transition-colors border-none cursor-pointer flex items-center gap-1.5 shadow-xs"
+                      >
+                        <Save className="w-3.5 h-3.5" />
+                        Salvar Resposta da Contratada
+                      </button>
+                    )}
+                  </div>
+
+                  <p className="text-[11px] text-slate-500">
+                    Campo de digitação reservado para a Contratada responder e prestar esclarecimentos sobre os comentários validados da fiscalização e gerenciadora. <em>(Não impede as assinaturas digitais)</em>
+                  </p>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-600 uppercase tracking-tight mb-1">
+                      Anotações / Resposta da Contratada (Um por linha)
+                    </label>
+                    <textarea
+                      value={(currentReport.comentariosContratada || []).join("\n")}
+                      onChange={(e) => updateReport({ 
+                        comentariosContratada: e.target.value.split("\n")
+                      })}
+                      disabled={isReadOnly || !isEditor || !isCommentsValidated}
+                      rows={4}
+                      className="block w-full rounded-lg border-slate-300 shadow-2xs focus:border-amber-500 focus:ring-1 focus:ring-amber-500 text-xs text-slate-800 bg-white disabled:bg-slate-100/70 disabled:text-slate-500"
+                      placeholder={
+                        !isCommentsValidated 
+                          ? "Estará disponível para resposta da Contratada assim que os comentários da fiscalização ou gerenciadora forem validados/concluídos." 
+                          : "Digite aqui os comentários e esclarecimentos da Contratada..."
+                      }
+                    />
+                  </div>
+                </fieldset>
+              );
+            })()}
 
             {/* ASSINATURAS DIGITAIS */}
             <div className="space-y-4 pt-6 mt-6 border-t border-slate-200">

@@ -151,6 +151,7 @@ export interface RdoReport {
   comentariosGerenciadoraContratante: string[];
   comentariosFiscalizacao?: string[];
   comentariosGerenciadora?: string[];
+  comentariosContratada?: string[];
   fiscalizacaoFinalizada?: boolean; // Tracking if fiscalização has been approved/finalized
   gerenciadoraFinalizada?: boolean; // Tracking if gerenciadora has been approved/finalized
   

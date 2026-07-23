@@ -820,7 +820,7 @@ const SingleReportPrint: React.FC<{ report: RdoReport }> = ({ report }) => {
               <h4 className="text-[9px] font-bold bg-[#004899] text-white py-0.5 px-2 uppercase tracking-wide">
                 COMENTÁRIO DA FISCALIZAÇÃO / GERENCIADORA / CONTRATANTE
               </h4>
-              <div className="border border-gray-300 p-2 min-h-16 bg-white flex flex-col gap-1 text-[8.5px]">
+              <div className="border border-gray-300 p-2 min-h-14 bg-white flex flex-col gap-1 text-[8.5px]">
                 {report.comentariosGerenciadoraContratante && report.comentariosGerenciadoraContratante.length > 0 ? (
                   report.comentariosGerenciadoraContratante.map((comm, idx) => (
                     <div key={idx} className="flex gap-1 items-start text-gray-700 leading-tight">
@@ -833,6 +833,23 @@ const SingleReportPrint: React.FC<{ report: RdoReport }> = ({ report }) => {
                 )}
               </div>
             </div>
+
+            {/* COMENTÁRIOS / RESPOSTA DA CONTRATADA */}
+            {report.comentariosContratada && report.comentariosContratada.length > 0 && (
+              <div className="mt-1.5">
+                <h4 className="text-[9px] font-bold bg-amber-700 text-white py-0.5 px-2 uppercase tracking-wide">
+                  COMENTÁRIOS / RESPOSTA DA CONTRATADA (SEEL ENGENHARIA)
+                </h4>
+                <div className="border border-gray-300 p-2 min-h-10 bg-white flex flex-col gap-1 text-[8.5px]">
+                  {report.comentariosContratada.map((comm, idx) => (
+                    <div key={idx} className="flex gap-1 items-start text-gray-800 leading-tight">
+                      <span className="text-amber-800 font-bold">{(idx + 1).toString().padStart(3, "0")} -</span>
+                      <p className="flex-1 italic font-medium">{comm}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           <PrintFooter pageNum={3} />
