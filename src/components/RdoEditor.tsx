@@ -2682,10 +2682,10 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
             <div className="space-y-4 pt-6 mt-6 border-t border-slate-200">
               <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider border-b border-slate-200 pb-1.5 pt-2">Firmas e Signatários Responsáveis</h3>
               
-              {currentReport.status !== "Finalizado" && currentReport.status !== "Assinado" && currentReport.status !== "Cancelado" && (
+              {currentReport.status === "Em Digitação" && (
                 <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 text-slate-500 text-xs flex items-center gap-2">
                   <AlertCircle className="w-4 h-4 text-slate-400 shrink-0" />
-                  <span>A coleta de assinaturas digitais estará disponível assim que o RDO for <strong>Fechado pelo Editor</strong> (após conclusão da análise do fiscal).</span>
+                  <span>A coleta de assinaturas digitais estará disponível assim que o RDO for enviado para fiscalização ou finalizado.</span>
                 </div>
               )}
 
@@ -2767,7 +2767,7 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
                                   emitenteConsolidado: `Assinado digitalmente por ${displayEmitenteNome} (${user?.email || "Emissor"}) em ${formattedDate} às ${formattedTime}`,
                                   emitenteHash: hash,
                                   hasCommentNotification: false,
-                                  status: willBeFullySigned ? "Assinado" : (currentReport.status === "Em Digitação" ? "Enviado para Fiscalização" : currentReport.status)
+                                  status: willBeFullySigned ? "Assinado" : "Enviado para Fiscalização"
                                 });
 
                                 alert("RDO assinado com sucesso como Emitente!");
@@ -2806,13 +2806,16 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
                                 const formattedTime = stampDate.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
                                 const hash = "emit_" + Array.from({length: 24}, () => Math.floor(Math.random()*16).toString(16)).join("");
 
+                                const willBeFullySigned = currentReport.gerenciadoraAssinado && currentReport.contratanteAssinado;
+
                                 await saveReport({
                                   ...currentReport,
                                   emitenteAssinado: true,
                                   emitenteNome: displayEmitenteNome,
                                   emitenteConsolidado: `Assinado e validado digitalmente por ${displayEmitenteNome} (${user?.email || "Emissor"}) em ${formattedDate} às ${formattedTime}`,
                                   emitenteHash: hash,
-                                  hasCommentNotification: false
+                                  hasCommentNotification: false,
+                                  status: willBeFullySigned ? "Assinado" : "Enviado para Fiscalização"
                                 });
 
                                 alert("RDO re-assinado com validação dos comentários com sucesso!");
