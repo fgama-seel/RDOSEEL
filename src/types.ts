@@ -155,6 +155,12 @@ export interface RdoReport {
   fiscalizacaoFinalizada?: boolean; // Tracking if fiscalização has been approved/finalized
   gerenciadoraFinalizada?: boolean; // Tracking if gerenciadora has been approved/finalized
   
+  // Notification fields for Contractor alerts
+  hasCommentNotification?: boolean;
+  commentNotificationDate?: string;
+  commentNotificationSource?: string;
+  commentNotificationText?: string;
+  
   // Signatures
   emitenteNome: string;
   emitenteConsolidado: string;

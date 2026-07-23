@@ -27,7 +27,8 @@ import {
   Activity,
   Calendar,
   Printer,
-  BarChart3
+  BarChart3,
+  Bell
 } from "lucide-react";
 
 // Formatting helper
@@ -74,6 +75,11 @@ function AppContent() {
   const [statusFilter, setStatusFilter] = useState<"todos" | "Em Digitação" | "Finalizado" | "Assinado">("todos");
   const [activeView, setActiveView] = useState<"rdo" | "relatorios" | "auditoria">("rdo");
   const [showPrintView, setShowPrintView] = useState(false);
+  const [showNotificationsPopover, setShowNotificationsPopover] = useState(false);
+
+  const notificationReports = (reports || []).filter(r => 
+    r.hasCommentNotification && (!currentObra || r.obraId === currentObra.id)
+  );
   const [showBatchPrint, setShowBatchPrint] = useState(false);
   const [showBatchPrintConfig, setShowBatchPrintConfig] = useState(false);
   const [batchStartDate, setBatchStartDate] = useState("");
@@ -215,6 +221,86 @@ function AppContent() {
           <div className="hidden sm:flex flex-col text-right">
             <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">Acesso Engenharia</span>
             <span className="text-xs font-semibold text-slate-700">{user.email}</span>
+          </div>
+
+          {/* Icone de Notificações ao lado do E-mail */}
+          <div className="relative">
+            <button
+              onClick={() => setShowNotificationsPopover(!showNotificationsPopover)}
+              className="relative p-1.5 text-slate-500 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-all border-none bg-transparent cursor-pointer flex items-center justify-center"
+              title="Notificações de Comentários do RDO"
+            >
+              <Bell className="w-4 h-4 text-slate-600" />
+              {notificationReports.length > 0 && (
+                <span className="absolute -top-1 -right-1 bg-amber-500 text-white text-[9px] font-black w-4 h-4 rounded-full flex items-center justify-center animate-bounce shadow-xs">
+                  {notificationReports.length}
+                </span>
+              )}
+            </button>
+
+            {/* Popover de Notificações */}
+            {showNotificationsPopover && (
+              <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-white rounded-2xl border border-slate-200 shadow-2xl z-[999] p-4 text-slate-800 animate-fade-in space-y-3">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                  <div className="flex items-center gap-2">
+                    <Bell className="w-4 h-4 text-amber-600" />
+                    <h4 className="font-bold text-xs uppercase tracking-wider text-slate-800">
+                      Alertas de Comentários ({notificationReports.length})
+                    </h4>
+                  </div>
+                  <button
+                    onClick={() => setShowNotificationsPopover(false)}
+                    className="text-slate-400 hover:text-slate-600 text-xs font-bold border-none bg-transparent cursor-pointer"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                {notificationReports.length === 0 ? (
+                  <div className="py-6 text-center text-slate-400 text-xs italic">
+                    Nenhum alerta de comentário pendente no momento.
+                  </div>
+                ) : (
+                  <div className="max-h-80 overflow-y-auto space-y-2.5 pr-1">
+                    {notificationReports.map((r) => (
+                      <div key={r.id} className="p-3 bg-amber-50/50 hover:bg-amber-50 rounded-xl border border-amber-200/80 transition-colors space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="font-extrabold text-xs text-amber-950">
+                            RDO Nº {r.rdoNo} - {formatDateString(r.data)}
+                          </span>
+                          <span className="text-[8px] font-black uppercase px-2 py-0.5 rounded-full bg-amber-200 text-amber-800">
+                            {r.commentNotificationSource || "Comentário"}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-600 line-clamp-2 italic">
+                          "{r.commentNotificationText || "Comentário registrado pela gerenciadora ou fiscalização."}"
+                        </p>
+                        <div className="flex items-center justify-end gap-2 pt-1">
+                          <button
+                            onClick={async () => {
+                              await saveReport({ ...r, hasCommentNotification: false });
+                            }}
+                            className="px-2 py-1 text-[9px] font-bold text-slate-500 hover:text-slate-800 uppercase tracking-wider border-none bg-transparent cursor-pointer"
+                          >
+                            Marcar Lida
+                          </button>
+                          <button
+                            onClick={() => {
+                              setCurrentReport(r);
+                              setActiveView("rdo");
+                              setShowNotificationsPopover(false);
+                            }}
+                            className="px-2.5 py-1 text-[9px] font-extrabold bg-amber-600 hover:bg-amber-700 text-white rounded-md uppercase tracking-wider border-none cursor-pointer shadow-xs"
+                          >
+                            Verificar e Rebater
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="h-6 border-l border-slate-200 hidden sm:block"></div>

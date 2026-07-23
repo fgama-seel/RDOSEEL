@@ -2367,10 +2367,15 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
                         try {
                           setSaving(true);
                           
-                          // Salva como finalizado
+                          // Salva como finalizado e dispara notificação para a Contratada se houver comentários
+                          const fiscalCommentsText = (currentReport.comentariosFiscalizacao || currentReport.comentariosGerenciadoraContratante || []).filter(Boolean).join("; ");
                           await saveReport({
                             ...currentReport,
-                            fiscalizacaoFinalizada: true
+                            fiscalizacaoFinalizada: true,
+                            hasCommentNotification: Boolean(fiscalCommentsText.trim()),
+                            commentNotificationDate: new Date().toISOString(),
+                            commentNotificationSource: "Fiscalização",
+                            commentNotificationText: fiscalCommentsText
                           });
 
                           // Dispara e-mail para o emissor/editor
@@ -2504,10 +2509,15 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
                         try {
                           setSaving(true);
                           
-                          // Salva como finalizado
+                          // Salva como finalizado e dispara notificação para a Contratada se houver comentários
+                          const gerCommentsText = (currentReport.comentariosGerenciadora || []).filter(Boolean).join("; ");
                           await saveReport({
                             ...currentReport,
-                            gerenciadoraFinalizada: true
+                            gerenciadoraFinalizada: true,
+                            hasCommentNotification: Boolean(gerCommentsText.trim()),
+                            commentNotificationDate: new Date().toISOString(),
+                            commentNotificationSource: "Gerenciadora",
+                            commentNotificationText: gerCommentsText
                           });
 
                           // Dispara e-mail para o emissor/editor
@@ -2577,11 +2587,29 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
                 (currentReport.comentariosGerenciadoraContratante && currentReport.comentariosGerenciadoraContratante.length > 0) ||
                 (currentReport.comentariosGerenciadora && currentReport.comentariosGerenciadora.length > 0) ||
                 currentReport.status === "Finalizado" ||
-                currentReport.status === "Assinado"
+                currentReport.status === "Assinado" ||
+                currentReport.hasCommentNotification
               );
 
               return (
                 <fieldset disabled={isReadOnly || currentReport.status === "Cancelado"} className={`space-y-4 border-t border-slate-200 pt-5 mt-2 ${isCommentsValidated ? 'bg-amber-50/20 p-4 rounded-xl border border-amber-200/80 shadow-2xs' : ''}`}>
+                  
+                  {currentReport.hasCommentNotification && (
+                    <div className="p-3 bg-amber-500/15 border border-amber-400 rounded-xl text-amber-900 text-xs flex items-center justify-between gap-3 animate-fade-in shadow-xs">
+                      <div className="flex items-center gap-2.5">
+                        <AlertCircle className="w-5 h-5 text-amber-600 shrink-0" />
+                        <div>
+                          <p className="font-bold text-xs uppercase tracking-tight">
+                            Comentário Registrado pela {currentReport.commentNotificationSource || "Gerenciadora / Fiscalização"}
+                          </p>
+                          <p className="text-[11px] text-amber-800 leading-snug">
+                            {currentReport.commentNotificationText || "Há observações registradas no diário. Verifique e insira seus esclarecimentos abaixo."}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2">
                       <span>Comentários da Contratada</span>
@@ -2601,10 +2629,13 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
                         onClick={async () => {
                           try {
                             setSaving(true);
-                            await saveReport(currentReport);
+                            await saveReport({
+                              ...currentReport,
+                              hasCommentNotification: false
+                            });
                             setSaveSuccess(true);
                             setTimeout(() => setSaveSuccess(false), 3000);
-                            alert("Resposta da Contratada salva com sucesso!");
+                            alert("Resposta da Contratada salva e notificação marcada como verificada!");
                           } catch (err) {
                             console.error(err);
                             alert("Erro ao salvar comentários da Contratada.");
@@ -2615,7 +2646,7 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
                         className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-[10px] font-bold uppercase tracking-wider transition-colors border-none cursor-pointer flex items-center gap-1.5 shadow-xs"
                       >
                         <Save className="w-3.5 h-3.5" />
-                        Salvar Resposta da Contratada
+                        Salvar e Confirmar Resposta
                       </button>
                     )}
                   </div>
@@ -2670,7 +2701,7 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
                 <div className="p-4 bg-white rounded-xl border border-slate-200 space-y-4 shadow-xs relative overflow-hidden flex flex-col justify-between">
                   <div>
                     <div className="flex items-center justify-between border-b border-slate-100 pb-2 mb-3">
-                      <span className="font-bold text-xs uppercase tracking-wide text-sky-700">Emitente Emissor (Contratada)</span>
+                      <span className="font-bold text-xs uppercase tracking-wide text-sky-700">Emitente Emissor (Contratada SEEL)</span>
                       {currentReport.emitenteAssinado ? (
                         <span className="bg-emerald-100 text-emerald-800 text-[8px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full flex items-center gap-1">
                           <Check className="w-2.5 h-2.5" /> Assinado
@@ -2707,59 +2738,104 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
                     )}
                   </div>
 
-                  {!currentReport.emitenteAssinado && (
-                    <div className="pt-3">
-                      {isEditor && currentReport.status === "Finalizado" && (
-                        <button
-                          onClick={() => {
-                            if (!displayEmitenteNome?.trim()) {
-                              alert("Por favor, configure o Nome do Engenheiro Emissor na aba 'Gerenciar Obras' antes de assinar.");
-                              return;
-                            }
-                            showConfirmation(
-                              "Assinatura Digital - Emitente",
-                              "Você confirma a assinatura digital deste RDO como Engenheiro Emitente?",
-                              async () => {
-                                setSaving(true);
-                                try {
-                                  const stampDate = new Date();
-                                  const formattedDate = stampDate.toLocaleDateString("pt-BR");
-                                  const formattedTime = stampDate.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
-                                  const hash = "emit_" + Array.from({length: 24}, () => Math.floor(Math.random()*16).toString(16)).join("");
-                                  
-                                  const willBeFullySigned = currentReport.gerenciadoraAssinado && currentReport.contratanteAssinado;
+                  <div className="pt-3 space-y-2">
+                    {/* Botão de Primeira Assinatura da Contratada (disponível assim que enviado para fiscalização ou finalizado) */}
+                    {!currentReport.emitenteAssinado && isEditor && (currentReport.status === "Enviado para Fiscalização" || currentReport.status === "Finalizado" || currentReport.status === "Assinado") && (
+                      <button
+                        onClick={() => {
+                          if (!displayEmitenteNome?.trim()) {
+                            alert("Por favor, configure o Nome do Engenheiro Emissor na aba 'Gerenciar Obras' antes de assinar.");
+                            return;
+                          }
+                          showConfirmation(
+                            "Assinatura Digital - Emitente (Contratada SEEL)",
+                            "Você confirma a assinatura digital deste RDO como Engenheiro Emitente da Contratada?",
+                            async () => {
+                              setSaving(true);
+                              try {
+                                const stampDate = new Date();
+                                const formattedDate = stampDate.toLocaleDateString("pt-BR");
+                                const formattedTime = stampDate.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+                                const hash = "emit_" + Array.from({length: 24}, () => Math.floor(Math.random()*16).toString(16)).join("");
+                                
+                                const willBeFullySigned = currentReport.gerenciadoraAssinado && currentReport.contratanteAssinado;
 
-                                  await saveReport({
-                                    ...currentReport,
-                                    emitenteAssinado: true,
-                                    emitenteNome: displayEmitenteNome,
-                                    emitenteConsolidado: `Assinado digitalmente por ${displayEmitenteNome} (${user?.email || "Emissor"}) em ${formattedDate} às ${formattedTime}`,
-                                    emitenteHash: hash,
-                                    status: willBeFullySigned ? "Assinado" : "Finalizado"
-                                  });
+                                await saveReport({
+                                  ...currentReport,
+                                  emitenteAssinado: true,
+                                  emitenteNome: displayEmitenteNome,
+                                  emitenteConsolidado: `Assinado digitalmente por ${displayEmitenteNome} (${user?.email || "Emissor"}) em ${formattedDate} às ${formattedTime}`,
+                                  emitenteHash: hash,
+                                  hasCommentNotification: false,
+                                  status: willBeFullySigned ? "Assinado" : (currentReport.status === "Em Digitação" ? "Enviado para Fiscalização" : currentReport.status)
+                                });
 
-                                  alert("RDO assinado com sucesso como Emitente!");
-                                } catch (err: any) {
-                                  console.error(err);
-                                  alert("Erro ao salvar assinatura: " + err.message);
-                                } finally {
-                                  setSaving(false);
-                                }
-                              },
-                              "success",
-                              "Sim, Assinar RDO",
-                              "Cancelar"
-                            );
-                          }}
-                          disabled={saving || !displayEmitenteNome?.trim()}
-                          className="w-full h-8 flex items-center justify-center gap-1.5 px-3 bg-sky-600 hover:bg-sky-700 text-white font-bold text-[10px] uppercase tracking-wide rounded cursor-pointer border-none shadow-sm duration-150 transition-colors disabled:opacity-50"
-                        >
-                          <Lock className="w-3.5 h-3.5" />
-                          Assinar Digitalmente
-                        </button>
-                      )}
-                    </div>
-                  )}
+                                alert("RDO assinado com sucesso como Emitente!");
+                              } catch (err: any) {
+                                console.error(err);
+                                alert("Erro ao salvar assinatura: " + err.message);
+                              } finally {
+                                setSaving(false);
+                              }
+                            },
+                            "success",
+                            "Sim, Assinar RDO",
+                            "Cancelar"
+                          );
+                        }}
+                        disabled={saving || !displayEmitenteNome?.trim()}
+                        className="w-full h-8 flex items-center justify-center gap-1.5 px-3 bg-sky-600 hover:bg-sky-700 text-white font-bold text-[10px] uppercase tracking-wide rounded cursor-pointer border-none shadow-sm duration-150 transition-colors disabled:opacity-50"
+                      >
+                        <Lock className="w-3.5 h-3.5" />
+                        Assinar Digitalmente (Contratada SEEL)
+                      </button>
+                    )}
+
+                    {/* Botão de Re-Assinatura / Rebate de Comentários para a Contratada */}
+                    {currentReport.emitenteAssinado && isEditor && (
+                      <button
+                        onClick={() => {
+                          showConfirmation(
+                            "Validar / Rebater Comentários e Assinar Novamente",
+                            "Você deseja atualizar sua assinatura digital declarando que verificou os comentários da Gerenciadora / Fiscalização?",
+                            async () => {
+                              setSaving(true);
+                              try {
+                                const stampDate = new Date();
+                                const formattedDate = stampDate.toLocaleDateString("pt-BR");
+                                const formattedTime = stampDate.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+                                const hash = "emit_" + Array.from({length: 24}, () => Math.floor(Math.random()*16).toString(16)).join("");
+
+                                await saveReport({
+                                  ...currentReport,
+                                  emitenteAssinado: true,
+                                  emitenteNome: displayEmitenteNome,
+                                  emitenteConsolidado: `Assinado e validado digitalmente por ${displayEmitenteNome} (${user?.email || "Emissor"}) em ${formattedDate} às ${formattedTime}`,
+                                  emitenteHash: hash,
+                                  hasCommentNotification: false
+                                });
+
+                                alert("RDO re-assinado com validação dos comentários com sucesso!");
+                              } catch (err: any) {
+                                console.error(err);
+                                alert("Erro ao re-assinar RDO: " + err.message);
+                              } finally {
+                                setSaving(false);
+                              }
+                            },
+                            "warning",
+                            "Sim, Validar e Re-Assinar",
+                            "Cancelar"
+                          );
+                        }}
+                        disabled={saving}
+                        className="w-full py-1.5 px-2 bg-amber-600 hover:bg-amber-700 text-white font-bold text-[9px] uppercase tracking-wider rounded cursor-pointer border-none shadow-xs transition-colors flex items-center justify-center gap-1.5"
+                      >
+                        <Lock className="w-3 h-3" />
+                        Validar Comentários e Re-Assinar
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 {/* SIGNATURE 2: FISCAL GERENCIADORA */}
@@ -2805,7 +2881,7 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
 
                   {!currentReport.gerenciadoraAssinado && (
                     <div className="pt-3">
-                      {isFiscalizadora && currentReport.status === "Finalizado" && (
+                      {isFiscalizadora && (currentReport.status === "Finalizado" || currentReport.status === "Enviado para Fiscalização") && (
                         <button
                           onClick={() => {
                             if (!displayGerenciadoraNome?.trim()) {
@@ -2824,6 +2900,7 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
                                   const hash = "ger_" + Array.from({length: 24}, () => Math.floor(Math.random()*16).toString(16)).join("");
                                   
                                   const willBeFullySigned = currentReport.emitenteAssinado && currentReport.contratanteAssinado;
+                                  const gerComments = (currentReport.comentariosGerenciadora || []).filter(Boolean).join("; ");
 
                                   await saveReport({
                                     ...currentReport,
@@ -2831,6 +2908,10 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
                                     gerenciadoraNome: displayGerenciadoraNome,
                                     gerenciadoraConsolidado: `Assinado digitalmente por ${displayGerenciadoraNome} (${user?.email || "Gerenciadora"}) em ${formattedDate} às ${formattedTime}`,
                                     gerenciadoraHash: hash,
+                                    hasCommentNotification: gerComments.trim().length > 0,
+                                    commentNotificationDate: new Date().toISOString(),
+                                    commentNotificationSource: "Gerenciadora",
+                                    commentNotificationText: gerComments || "Comentário registrado na assinatura da Gerenciadora",
                                     status: willBeFullySigned ? "Assinado" : "Finalizado"
                                   });
 
@@ -2901,7 +2982,7 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
 
                   {!currentReport.contratanteAssinado && (
                     <div className="pt-3">
-                      {isFiscalizacao && currentReport.status === "Finalizado" && (
+                      {isFiscalizacao && (currentReport.status === "Finalizado" || currentReport.status === "Enviado para Fiscalização") && (
                         <button
                           onClick={() => {
                             if (!displayContratanteNome?.trim()) {
@@ -2920,6 +3001,7 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
                                   const hash = "fisc_" + Array.from({length: 24}, () => Math.floor(Math.random()*16).toString(16)).join("");
                                   
                                   const willBeFullySigned = currentReport.emitenteAssinado && currentReport.gerenciadoraAssinado;
+                                  const fiscComments = (currentReport.comentariosFiscalizacao || currentReport.comentariosGerenciadoraContratante || []).filter(Boolean).join("; ");
 
                                   await saveReport({
                                     ...currentReport,
@@ -2927,6 +3009,10 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
                                     contratanteNome: displayContratanteNome,
                                     contratanteAprovado: `Aprovado digitalmente por ${displayContratanteNome} (${user?.email || "Fiscal"}) em ${formattedDate} às ${formattedTime}`,
                                     contratanteHash: hash,
+                                    hasCommentNotification: fiscComments.trim().length > 0,
+                                    commentNotificationDate: new Date().toISOString(),
+                                    commentNotificationSource: "Fiscalização",
+                                    commentNotificationText: fiscComments || "Comentário registrado na assinatura da Fiscalização",
                                     status: willBeFullySigned ? "Assinado" : "Finalizado"
                                   });
 
