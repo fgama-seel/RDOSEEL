@@ -157,6 +157,284 @@ export const ConsolidatedReports: React.FC = () => {
     });
   }, [filteredReports]);
 
+  // 1B. DATA PREPARATION: MONTHLY BREAKDOWN FOR LABOR & EQUIPMENT (MOD / MOI / SUBCONTRATADO & PRÓPRIO / TERCEIRIZADO)
+  const histogramMonthlySummary = useMemo(() => {
+    const monthsSet = new Set<string>();
+    const monthRdoCountMap: Record<string, number> = {};
+
+    filteredReports.forEach(r => {
+      const monthKey = r.data.substring(0, 7); // YYYY-MM
+      monthsSet.add(monthKey);
+      monthRdoCountMap[monthKey] = (monthRdoCountMap[monthKey] || 0) + 1;
+    });
+
+    const sortedMonths = Array.from(monthsSet).sort();
+    const totalRdoDays = filteredReports.length;
+
+    // Helper map for labor items
+    const laborMap: Record<string, {
+      cargo: string;
+      category: "MOD" | "MOI" | "SUBCONTRATADO";
+      groupCompany: string;
+      monthCounts: Record<string, { sum: number; peak: number }>;
+      periodSum: number;
+      periodPeak: number;
+    }> = {};
+
+    // Helper map for equipment items
+    const equipMap: Record<string, {
+      equip: string;
+      category: "PROPRIO" | "SUBCONTRATADO";
+      company: string;
+      monthCounts: Record<string, { sum: number; peak: number }>;
+      periodSum: number;
+      periodPeak: number;
+    }> = {};
+
+    filteredReports.forEach(report => {
+      const monthKey = report.data.substring(0, 7);
+
+      // Process Labor
+      if (report.efetivoDetalhado && report.efetivoDetalhado.length > 0) {
+        report.efetivoDetalhado.forEach(group => {
+          const groupName = group.nome || "";
+          const isOwn = groupName.toLowerCase().includes("seel") || groupName.toLowerCase().includes("proprio");
+
+          (group.items || []).forEach(item => {
+            const cargo = (item.cargo || "").trim();
+            if (!cargo) return;
+
+            let category: "MOD" | "MOI" | "SUBCONTRATADO" = "MOD";
+            if (!isOwn) {
+              category = "SUBCONTRATADO";
+            } else if (item.moiMod === "MOI") {
+              category = "MOI";
+            }
+
+            const qty = item.t || 0;
+            if (qty <= 0) return;
+
+            const key = `${category}__${cargo.toLowerCase()}`;
+            if (!laborMap[key]) {
+              laborMap[key] = {
+                cargo,
+                category,
+                groupCompany: groupName || (isOwn ? "SEEL ENGENHARIA" : "Subcontratada"),
+                monthCounts: {},
+                periodSum: 0,
+                periodPeak: 0
+              };
+            }
+
+            const entry = laborMap[key];
+            if (!entry.monthCounts[monthKey]) {
+              entry.monthCounts[monthKey] = { sum: 0, peak: 0 };
+            }
+            entry.monthCounts[monthKey].sum += qty;
+            if (qty > entry.monthCounts[monthKey].peak) {
+              entry.monthCounts[monthKey].peak = qty;
+            }
+
+            entry.periodSum += qty;
+            if (qty > entry.periodPeak) {
+              entry.periodPeak = qty;
+            }
+          });
+        });
+      } else if (report.efetivoSummary) {
+        const { moi, mod, subcontratadosMoiMod } = report.efetivoSummary;
+        const items = [
+          { cargo: "Mão de Obra Direta (MOD)", category: "MOD" as const, qty: mod, company: "SEEL" },
+          { cargo: "Mão de Obra Indireta (MOI)", category: "MOI" as const, qty: moi, company: "SEEL" },
+          { cargo: "Pessoal Subcontratado", category: "SUBCONTRATADO" as const, qty: subcontratadosMoiMod, company: "Subcontratados" }
+        ];
+
+        items.forEach(it => {
+          if (it.qty <= 0) return;
+          const key = `${it.category}__${it.cargo.toLowerCase()}`;
+          if (!laborMap[key]) {
+            laborMap[key] = {
+              cargo: it.cargo,
+              category: it.category,
+              groupCompany: it.company,
+              monthCounts: {},
+              periodSum: 0,
+              periodPeak: 0
+            };
+          }
+          const entry = laborMap[key];
+          if (!entry.monthCounts[monthKey]) {
+            entry.monthCounts[monthKey] = { sum: 0, peak: 0 };
+          }
+          entry.monthCounts[monthKey].sum += it.qty;
+          if (it.qty > entry.monthCounts[monthKey].peak) entry.monthCounts[monthKey].peak = it.qty;
+          entry.periodSum += it.qty;
+          if (it.qty > entry.periodPeak) entry.periodPeak = it.qty;
+        });
+      }
+
+      // Process Equipment
+      if (report.equipamentosDetalhado && report.equipamentosDetalhado.length > 0) {
+        report.equipamentosDetalhado.forEach(eq => {
+          const equipName = (eq.descricao || "").trim();
+          if (!equipName) return;
+
+          const company = eq.empresa || "SEEL";
+          const isOwn = company.toLowerCase().includes("seel") || company.toLowerCase().includes("proprio");
+          const category: "PROPRIO" | "SUBCONTRATADO" = isOwn ? "PROPRIO" : "SUBCONTRATADO";
+          const qty = eq.quantidade || 0;
+          if (qty <= 0) return;
+
+          const key = `${category}__${equipName.toLowerCase()}`;
+          if (!equipMap[key]) {
+            equipMap[key] = {
+              equip: equipName,
+              category,
+              company,
+              monthCounts: {},
+              periodSum: 0,
+              periodPeak: 0
+            };
+          }
+
+          const entry = equipMap[key];
+          if (!entry.monthCounts[monthKey]) {
+            entry.monthCounts[monthKey] = { sum: 0, peak: 0 };
+          }
+          entry.monthCounts[monthKey].sum += qty;
+          if (qty > entry.monthCounts[monthKey].peak) entry.monthCounts[monthKey].peak = qty;
+          entry.periodSum += qty;
+          if (qty > entry.periodPeak) entry.periodPeak = qty;
+        });
+      } else if (report.equipamentosSummary) {
+        const { mobilizados, subcontratadosMobilizados } = report.equipamentosSummary;
+        const items = [
+          { equip: "Equipamentos Próprios - Geral", category: "PROPRIO" as const, qty: mobilizados, company: "SEEL" },
+          { equip: "Equipamentos Subcontratados - Geral", category: "SUBCONTRATADO" as const, qty: subcontratadosMobilizados, company: "Subcontratados" }
+        ];
+
+        items.forEach(it => {
+          if (it.qty <= 0) return;
+          const key = `${it.category}__${it.equip.toLowerCase()}`;
+          if (!equipMap[key]) {
+            equipMap[key] = {
+              equip: it.equip,
+              category: it.category,
+              company: it.company,
+              monthCounts: {},
+              periodSum: 0,
+              periodPeak: 0
+            };
+          }
+          const entry = equipMap[key];
+          if (!entry.monthCounts[monthKey]) {
+            entry.monthCounts[monthKey] = { sum: 0, peak: 0 };
+          }
+          entry.monthCounts[monthKey].sum += it.qty;
+          if (it.qty > entry.monthCounts[monthKey].peak) entry.monthCounts[monthKey].peak = it.qty;
+          entry.periodSum += it.qty;
+          if (it.qty > entry.periodPeak) entry.periodPeak = it.qty;
+        });
+      }
+    });
+
+    // Format list of months with labels e.g. "05/2026"
+    const monthsFormatted = sortedMonths.map(m => {
+      const [yyyy, mm] = m.split("-");
+      return { key: m, label: `${mm}/${yyyy}`, rdoDays: monthRdoCountMap[m] || 1 };
+    });
+
+    // Format Labor list
+    const laborList = Object.values(laborMap).map(item => {
+      const monthlyAvgs: Record<string, number> = {};
+      const monthlyPeaks: Record<string, number> = {};
+
+      sortedMonths.forEach(mKey => {
+        const rdoDaysInMonth = monthRdoCountMap[mKey] || 1;
+        const monthData = item.monthCounts[mKey];
+        if (monthData) {
+          monthlyAvgs[mKey] = Math.round((monthData.sum / rdoDaysInMonth) * 10) / 10;
+          monthlyPeaks[mKey] = monthData.peak;
+        } else {
+          monthlyAvgs[mKey] = 0;
+          monthlyPeaks[mKey] = 0;
+        }
+      });
+
+      const overallAvg = totalRdoDays > 0 ? Math.round((item.periodSum / totalRdoDays) * 10) / 10 : 0;
+
+      return {
+        ...item,
+        monthlyAvgs,
+        monthlyPeaks,
+        overallAvg
+      };
+    }).sort((a, b) => b.overallAvg - a.overallAvg);
+
+    // Group labor by category
+    const laborMOD = laborList.filter(l => l.category === "MOD");
+    const laborMOI = laborList.filter(l => l.category === "MOI");
+    const laborSubcontratado = laborList.filter(l => l.category === "SUBCONTRATADO");
+
+    // Format Equipment list
+    const equipList = Object.values(equipMap).map(item => {
+      const monthlyAvgs: Record<string, number> = {};
+      const monthlyPeaks: Record<string, number> = {};
+
+      sortedMonths.forEach(mKey => {
+        const rdoDaysInMonth = monthRdoCountMap[mKey] || 1;
+        const monthData = item.monthCounts[mKey];
+        if (monthData) {
+          monthlyAvgs[mKey] = Math.round((monthData.sum / rdoDaysInMonth) * 10) / 10;
+          monthlyPeaks[mKey] = monthData.peak;
+        } else {
+          monthlyAvgs[mKey] = 0;
+          monthlyPeaks[mKey] = 0;
+        }
+      });
+
+      const overallAvg = totalRdoDays > 0 ? Math.round((item.periodSum / totalRdoDays) * 10) / 10 : 0;
+
+      return {
+        ...item,
+        monthlyAvgs,
+        monthlyPeaks,
+        overallAvg
+      };
+    }).sort((a, b) => b.overallAvg - a.overallAvg);
+
+    // Group equipment by category
+    const equipProprio = equipList.filter(e => e.category === "PROPRIO");
+    const equipSubcontratado = equipList.filter(e => e.category === "SUBCONTRATADO");
+
+    // Peak total workforce in a single day
+    let maxWorkforceDay = 0;
+    filteredReports.forEach(r => {
+      let dailyTotal = 0;
+      if (r.efetivoDetalhado) {
+        r.efetivoDetalhado.forEach(g => {
+          (g.items || []).forEach(it => { dailyTotal += (it.t || 0); });
+        });
+      } else {
+        dailyTotal = (r.efetivoSummary?.moi || 0) + (r.efetivoSummary?.mod || 0) + (r.efetivoSummary?.subcontratadosMoiMod || 0);
+      }
+      if (dailyTotal > maxWorkforceDay) maxWorkforceDay = dailyTotal;
+    });
+
+    return {
+      monthsFormatted,
+      totalRdoDays,
+      laborList,
+      laborMOD,
+      laborMOI,
+      laborSubcontratado,
+      equipList,
+      equipProprio,
+      equipSubcontratado,
+      maxWorkforceDay
+    };
+  }, [filteredReports]);
+
   // 2. DATA PREPARATION: PLUVIOMETRY
   const pluviometryStats = useMemo(() => {
     let totalRain = 0;
@@ -645,6 +923,265 @@ export const ConsolidatedReports: React.FC = () => {
     };
   }, [filteredIdleEvents, idleChartViewMode]);
 
+  // Printable Histogram Report (PDF / Window Print)
+  const handlePrintHistogramReport = () => {
+    if (filteredReports.length === 0 || !currentObra) return;
+
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) return;
+
+    const totalMODAvg = Math.round(histogramData.reduce((acc, curr) => acc + curr["Mão de Obra Direta (MOD)"], 0) / histogramData.length * 10) / 10;
+    const totalMOIAvg = Math.round(histogramData.reduce((acc, curr) => acc + curr["Mão de Obra Indireta (MOI)"], 0) / histogramData.length * 10) / 10;
+    const totalSubAvg = Math.round(histogramData.reduce((acc, curr) => acc + curr["Subcontratados"], 0) / histogramData.length * 10) / 10;
+    const totalLaborAvg = Math.round(histogramData.reduce((acc, curr) => acc + curr["Total Mão de Obra"], 0) / histogramData.length * 10) / 10;
+
+    const totalEquipProprioAvg = Math.round(histogramData.reduce((acc, curr) => acc + curr["Equipamentos Próprios"], 0) / histogramData.length * 10) / 10;
+    const totalEquipSubAvg = Math.round(histogramData.reduce((acc, curr) => acc + curr["Equipamentos Subcontratados"], 0) / histogramData.length * 10) / 10;
+    const totalEquipAvg = Math.round(histogramData.reduce((acc, curr) => acc + curr["Total Equipamentos"], 0) / histogramData.length * 10) / 10;
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Relatório de Histograma de Recursos - ${currentObra.nome}</title>
+          <style>
+            @page { size: A4 portrait; margin: 12mm; }
+            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #1e293b; margin: 0; padding: 0; background: #fff; font-size: 10pt; }
+            .header-table { width: 100%; border-collapse: collapse; margin-bottom: 12px; border: 2px solid #004899; }
+            .header-table td { padding: 8px; border: 1px solid #cbd5e1; vertical-align: middle; }
+            .title-main { font-size: 13pt; font-weight: 800; color: #004899; text-transform: uppercase; text-align: center; margin: 0; }
+            .title-sub { font-size: 8pt; color: #64748b; text-align: center; margin-top: 2px; }
+            .info-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 14px; background: #f8fafc; border: 1px solid #e2e8f0; padding: 10px; border-radius: 6px; }
+            .info-item { font-size: 8.5pt; }
+            .info-item strong { color: #0f172a; display: block; font-size: 7.5pt; text-transform: uppercase; color: #64748b; }
+            .summary-box { display: flex; gap: 8px; margin-bottom: 14px; }
+            .summary-card { flex: 1; background: #f1f5f9; border: 1px solid #cbd5e1; border-radius: 6px; padding: 8px; text-align: center; }
+            .summary-card .val { font-size: 13pt; font-weight: 800; color: #004899; }
+            .summary-card .lbl { font-size: 7.5pt; text-transform: uppercase; font-weight: bold; color: #475569; margin-top: 2px; }
+            
+            .section-title { font-size: 10.5pt; font-weight: 800; color: #004899; text-transform: uppercase; border-bottom: 2px solid #004899; padding-bottom: 3px; margin-top: 14px; margin-bottom: 8px; }
+            .data-table { width: 100%; border-collapse: collapse; font-size: 8.5pt; margin-bottom: 12px; }
+            .data-table th { background: #004899; color: #ffffff; text-transform: uppercase; font-size: 7.5pt; padding: 5px; border: 1px solid #003366; text-align: left; }
+            .data-table td { padding: 4px 6px; border: 1px solid #e2e8f0; }
+            .data-table tr:nth-child(even) { background: #f8fafc; }
+            .cat-header { background: #e2e8f0 !important; font-weight: bold; color: #0f172a; text-transform: uppercase; font-size: 8pt; }
+            .subtotal-row { background: #f1f5f9; font-weight: bold; }
+            
+            .signatures { margin-top: 24px; display: flex; justify-content: space-between; page-break-inside: avoid; }
+            .sig-block { width: 45%; text-align: center; border-top: 1px solid #0f172a; padding-top: 6px; font-size: 8.5pt; }
+            .footer { margin-top: 16px; font-size: 7.5pt; color: #94a3b8; text-align: center; border-top: 1px solid #e2e8f0; padding-top: 6px; }
+          </style>
+        </head>
+        <body>
+          <table class="header-table">
+            <tr>
+              <td style="width: 20%; text-align: center; background: #004899; color: white; font-weight: 900; font-size: 14pt;">SEEL</td>
+              <td style="width: 60%;">
+                <div class="title-main">Relatório Consolidado de Histograma de Recursos</div>
+                <div class="title-sub">Acompanhamento e Distribuição Mensal de Mão de Obra e Equipamentos</div>
+              </td>
+              <td style="width: 20%; text-align: center; font-size: 8pt; font-weight: bold; color: #334155;">
+                SISTEMA RDO<br/>
+                <span style="font-size: 7pt; font-weight: normal;">Emissão: ${new Date().toLocaleDateString("pt-BR")}</span>
+              </td>
+            </tr>
+          </table>
+
+          <div class="info-grid">
+            <div class="info-item"><strong>Obra / Contrato</strong>${currentObra.nome}</div>
+            <div class="info-item"><strong>Cliente / Contratante</strong>${currentObra.cliente || "-"}</div>
+            <div class="info-item"><strong>Período de Apuração</strong>${startDate ? startDate.split("-").reverse().join("/") : "Início"} até ${endDate ? endDate.split("-").reverse().join("/") : "Atual"}</div>
+            <div class="info-item"><strong>Total RDOs no Período</strong>${filteredReports.length} diários consolidados</div>
+          </div>
+
+          <div class="summary-box">
+            <div class="summary-card">
+              <div class="val">${totalMODAvg}</div>
+              <div class="lbl">Média MOD (Direta)</div>
+            </div>
+            <div class="summary-card">
+              <div class="val">${totalMOIAvg}</div>
+              <div class="lbl">Média MOI (Indireta)</div>
+            </div>
+            <div class="summary-card">
+              <div class="val">${totalSubAvg}</div>
+              <div class="lbl">Média Subcontratados</div>
+            </div>
+            <div class="summary-card">
+              <div class="val" style="color: #d97706;">${totalEquipProprioAvg}</div>
+              <div class="lbl">Frota Própria Média</div>
+            </div>
+            <div class="summary-card">
+              <div class="val" style="color: #0284c7;">${totalEquipSubAvg}</div>
+              <div class="lbl">Frota Subcontratada</div>
+            </div>
+            <div class="summary-card">
+              <div class="val" style="color: #7c3aed;">${histogramMonthlySummary.maxWorkforceDay}</div>
+              <div class="lbl">Pico Efetivo (Obra)</div>
+            </div>
+          </div>
+
+          <!-- TABELA RESUMO MÃO DE OBRA MENSAL -->
+          <div class="section-title">1. Resumo da Distribuição Mensal de Mão de Obra (Direta e Indireta)</div>
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Cargo / Função</th>
+                <th>Categoria</th>
+                <th>Empresa / Vínculo</th>
+                ${histogramMonthlySummary.monthsFormatted.map(m => `<th style="text-align: center;">${m.label}</th>`).join('')}
+                <th style="text-align: right;">Média Geral</th>
+                <th style="text-align: center;">Pico</th>
+              </tr>
+            </thead>
+            <tbody>
+              <!-- MOD -->
+              ${histogramMonthlySummary.laborMOD.length > 0 ? `
+                <tr class="cat-header"><td colspan="${5 + histogramMonthlySummary.monthsFormatted.length}">Mão de Obra Direta (MOD)</td></tr>
+                ${histogramMonthlySummary.laborMOD.map(item => `
+                  <tr>
+                    <td style="font-weight: 600;">${item.cargo}</td>
+                    <td><span style="color: #1e3a8a; font-weight: bold;">MOD</span></td>
+                    <td>${item.groupCompany}</td>
+                    ${histogramMonthlySummary.monthsFormatted.map(m => `
+                      <td style="text-align: center; font-weight: bold;">${item.monthlyAvgs[m.key] > 0 ? item.monthlyAvgs[m.key] : "-"}</td>
+                    `).join('')}
+                    <td style="text-align: right; font-weight: 800; color: #004899;">${item.overallAvg}</td>
+                    <td style="text-align: center; font-weight: 800; color: #d97706;">${item.periodPeak}</td>
+                  </tr>
+                `).join('')}
+              ` : ''}
+
+              <!-- MOI -->
+              ${histogramMonthlySummary.laborMOI.length > 0 ? `
+                <tr class="cat-header"><td colspan="${5 + histogramMonthlySummary.monthsFormatted.length}">Mão de Obra Indireta (MOI)</td></tr>
+                ${histogramMonthlySummary.laborMOI.map(item => `
+                  <tr>
+                    <td style="font-weight: 600;">${item.cargo}</td>
+                    <td><span style="color: #2563eb; font-weight: bold;">MOI</span></td>
+                    <td>${item.groupCompany}</td>
+                    ${histogramMonthlySummary.monthsFormatted.map(m => `
+                      <td style="text-align: center; font-weight: bold;">${item.monthlyAvgs[m.key] > 0 ? item.monthlyAvgs[m.key] : "-"}</td>
+                    `).join('')}
+                    <td style="text-align: right; font-weight: 800; color: #004899;">${item.overallAvg}</td>
+                    <td style="text-align: center; font-weight: 800; color: #d97706;">${item.periodPeak}</td>
+                  </tr>
+                `).join('')}
+              ` : ''}
+
+              <!-- SUBCONTRATADA -->
+              ${histogramMonthlySummary.laborSubcontratado.length > 0 ? `
+                <tr class="cat-header"><td colspan="${5 + histogramMonthlySummary.monthsFormatted.length}">Mão de Obra Subcontratada</td></tr>
+                ${histogramMonthlySummary.laborSubcontratado.map(item => `
+                  <tr>
+                    <td style="font-weight: 600;">${item.cargo}</td>
+                    <td><span style="color: #7c3aed; font-weight: bold;">Subcontratado</span></td>
+                    <td>${item.groupCompany}</td>
+                    ${histogramMonthlySummary.monthsFormatted.map(m => `
+                      <td style="text-align: center; font-weight: bold;">${item.monthlyAvgs[m.key] > 0 ? item.monthlyAvgs[m.key] : "-"}</td>
+                    `).join('')}
+                    <td style="text-align: right; font-weight: 800; color: #004899;">${item.overallAvg}</td>
+                    <td style="text-align: center; font-weight: 800; color: #d97706;">${item.periodPeak}</td>
+                  </tr>
+                `).join('')}
+              ` : ''}
+
+              <tr class="subtotal-row">
+                <td colspan="3">MÉDIA DIÁRIA TOTAL DE PESSOAL (MOD + MOI + SUB)</td>
+                ${histogramMonthlySummary.monthsFormatted.map(m => {
+                  const sumAvgInMonth = Math.round(histogramMonthlySummary.laborList.reduce((acc, curr) => acc + (curr.monthlyAvgs[m.key] || 0), 0) * 10) / 10;
+                  return `<td style="text-align: center; font-weight: 900; color: #004899;">${sumAvgInMonth}</td>`;
+                }).join('')}
+                <td style="text-align: right; font-weight: 900; color: #004899;">${totalLaborAvg}</td>
+                <td style="text-align: center; font-weight: 900; color: #7c3aed;">${histogramMonthlySummary.maxWorkforceDay}</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <!-- TABELA RESUMO EQUIPAMENTOS MENSAL -->
+          <div class="section-title">2. Resumo da Distribuição Mensal de Equipamentos (Próprios e Subcontratados)</div>
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Equipamento / Modelo</th>
+                <th>Categoria</th>
+                <th>Empresa / Fornecedor</th>
+                ${histogramMonthlySummary.monthsFormatted.map(m => `<th style="text-align: center;">${m.label}</th>`).join('')}
+                <th style="text-align: right;">Média Geral</th>
+                <th style="text-align: center;">Pico</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${histogramMonthlySummary.equipProprio.length > 0 ? `
+                <tr class="cat-header"><td colspan="${5 + histogramMonthlySummary.monthsFormatted.length}">Equipamentos Próprios (Direto)</td></tr>
+                ${histogramMonthlySummary.equipProprio.map(item => `
+                  <tr>
+                    <td style="font-weight: 600;">${item.equip}</td>
+                    <td><span style="color: #d97706; font-weight: bold;">Próprio</span></td>
+                    <td>${item.company}</td>
+                    ${histogramMonthlySummary.monthsFormatted.map(m => `
+                      <td style="text-align: center; font-weight: bold;">${item.monthlyAvgs[m.key] > 0 ? item.monthlyAvgs[m.key] : "-"}</td>
+                    `).join('')}
+                    <td style="text-align: right; font-weight: 800; color: #0284c7;">${item.overallAvg}</td>
+                    <td style="text-align: center; font-weight: 800; color: #d97706;">${item.periodPeak}</td>
+                  </tr>
+                `).join('')}
+              ` : ''}
+
+              ${histogramMonthlySummary.equipSubcontratado.length > 0 ? `
+                <tr class="cat-header"><td colspan="${5 + histogramMonthlySummary.monthsFormatted.length}">Equipamentos Subcontratados / Terceirizados</td></tr>
+                ${histogramMonthlySummary.equipSubcontratado.map(item => `
+                  <tr>
+                    <td style="font-weight: 600;">${item.equip}</td>
+                    <td><span style="color: #0284c7; font-weight: bold;">Subcontratado</span></td>
+                    <td>${item.company}</td>
+                    ${histogramMonthlySummary.monthsFormatted.map(m => `
+                      <td style="text-align: center; font-weight: bold;">${item.monthlyAvgs[m.key] > 0 ? item.monthlyAvgs[m.key] : "-"}</td>
+                    `).join('')}
+                    <td style="text-align: right; font-weight: 800; color: #0284c7;">${item.overallAvg}</td>
+                    <td style="text-align: center; font-weight: 800; color: #d97706;">${item.periodPeak}</td>
+                  </tr>
+                `).join('')}
+              ` : ''}
+
+              <tr class="subtotal-row">
+                <td colspan="3">FROTA MÉDIA TOTAL MOBILIZADA</td>
+                ${histogramMonthlySummary.monthsFormatted.map(m => {
+                  const sumAvgInMonth = Math.round(histogramMonthlySummary.equipList.reduce((acc, curr) => acc + (curr.monthlyAvgs[m.key] || 0), 0) * 10) / 10;
+                  return `<td style="text-align: center; font-weight: 900; color: #0284c7;">${sumAvgInMonth}</td>`;
+                }).join('')}
+                <td style="text-align: right; font-weight: 900; color: #0284c7;">${totalEquipAvg}</td>
+                <td style="text-align: center; font-weight: 900; color: #d97706;">-</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div class="signatures">
+            <div class="sig-block">
+              <strong>${currentObra.emissorNomeDefault || "Engenharia Residente / Emissor"}</strong><br/>
+              ${currentObra.contratada || "SEEL ENGENHARIA LTDA"}
+            </div>
+            <div class="sig-block">
+              <strong>${currentObra.fiscalGerenciadoraNomeDefault || currentObra.gerenciadora || "Fiscalização / Cliente"}</strong><br/>
+              ${currentObra.cliente || "Contratante"}
+            </div>
+          </div>
+
+          <div class="footer">
+            Relatório emitido automaticamente pelo Sistema SEEL RDO • ${new Date().toLocaleDateString("pt-BR")} às ${new Date().toLocaleTimeString("pt-BR")}
+          </div>
+
+          <script>
+            window.onload = function() { window.print(); };
+          </script>
+        </body>
+      </html>
+    `;
+
+    printWindow.document.write(html);
+    printWindow.document.close();
+  };
+
   // Printable Claim Report (PDF / Window Print)
   const handlePrintClaimReport = () => {
     if (filteredIdleEvents.length === 0) return;
@@ -919,7 +1456,45 @@ export const ConsolidatedReports: React.FC = () => {
       "Total Equipamentos": h["Total Equipamentos"]
     }));
     const wsHR = XLSX.utils.json_to_sheet(hrData);
-    XLSX.utils.book_append_sheet(wb, wsHR, "Efetivo e Equipamentos");
+    XLSX.utils.book_append_sheet(wb, wsHR, "Efetivo e Equipamentos (Diário)");
+
+    // Sheet 1B: Resumo Mensal de Mão de Obra
+    if (histogramMonthlySummary.laborList.length > 0) {
+      const laborExcelData = histogramMonthlySummary.laborList.map(item => {
+        const row: Record<string, any> = {
+          "Cargo / Função": item.cargo,
+          "Categoria": item.category,
+          "Empresa / Vínculo": item.groupCompany
+        };
+        histogramMonthlySummary.monthsFormatted.forEach(m => {
+          row[`Média (${m.label})`] = item.monthlyAvgs[m.key] || 0;
+        });
+        row["Média Geral"] = item.overallAvg;
+        row["Pico Máximo"] = item.periodPeak;
+        return row;
+      });
+      const wsLaborMonthly = XLSX.utils.json_to_sheet(laborExcelData);
+      XLSX.utils.book_append_sheet(wb, wsLaborMonthly, "Resumo Mão de Obra Mensal");
+    }
+
+    // Sheet 1C: Resumo Mensal de Equipamentos
+    if (histogramMonthlySummary.equipList.length > 0) {
+      const equipExcelData = histogramMonthlySummary.equipList.map(item => {
+        const row: Record<string, any> = {
+          "Equipamento / Modelo": item.equip,
+          "Categoria": item.category === "PROPRIO" ? "Próprio" : "Subcontratado",
+          "Empresa / Fornecedor": item.company
+        };
+        histogramMonthlySummary.monthsFormatted.forEach(m => {
+          row[`Média (${m.label})`] = item.monthlyAvgs[m.key] || 0;
+        });
+        row["Média Geral"] = item.overallAvg;
+        row["Pico Máximo"] = item.periodPeak;
+        return row;
+      });
+      const wsEquipMonthly = XLSX.utils.json_to_sheet(equipExcelData);
+      XLSX.utils.book_append_sheet(wb, wsEquipMonthly, "Resumo Equipamentos Mensal");
+    }
 
     // Sheet 2: Pluviometria
     const rainData = pluviometryStats.dailyRainList.map(r => ({
@@ -1114,28 +1689,54 @@ export const ConsolidatedReports: React.FC = () => {
           {/* TAB 1: HISTOGRAMAS DE MÃO DE OBRA E EQUIPAMENTOS */}
           {activeSubTab === "histogramas" && (
             <div className="space-y-6">
+              {/* Header Bar for Tab 1 */}
+              <div className="bg-white p-4 md:p-5 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="p-1.5 bg-amber-50 rounded-md text-amber-600">
+                      <Users className="w-4 h-4" />
+                    </span>
+                    <h3 className="font-bold text-base text-slate-900">Histograma de Recursos e Distribuição Mensal</h3>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Quadro consolidado de mão de obra (direta e indireta) e equipamentos cadastrados nos RDOs com distribuição por mês.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handlePrintHistogramReport}
+                    className="px-3.5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold tracking-wider uppercase transition-colors cursor-pointer border-none shadow-xs flex items-center gap-1.5"
+                    title="Emitir Dossiê / Relatório Impresso do Histograma"
+                  >
+                    <Printer className="w-3.5 h-3.5" />
+                    Emitir Relatório de Histograma
+                  </button>
+                </div>
+              </div>
+
               {/* Cards Summary */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-xs flex items-center gap-3.5">
-                  <div className="p-3 bg-amber-50 rounded-lg text-amber-600">
+                  <div className="p-3 bg-blue-50 rounded-lg text-blue-600">
                     <Users className="w-5 h-5" />
                   </div>
                   <div>
-                    <span className="block text-[10px] text-slate-400 font-extrabold uppercase tracking-wider">Média de Mão de Obra Diária</span>
+                    <span className="block text-[10px] text-slate-400 font-extrabold uppercase tracking-wider">Média Mão de Obra Diária</span>
                     <span className="text-lg font-bold text-slate-800">
-                      {Math.round(histogramData.reduce((acc, curr) => acc + curr["Total Mão de Obra"], 0) / histogramData.length)} colaboradores
+                      {Math.round(histogramData.reduce((acc, curr) => acc + curr["Total Mão de Obra"], 0) / (histogramData.length || 1))} colaboradores
                     </span>
                   </div>
                 </div>
 
                 <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-xs flex items-center gap-3.5">
-                  <div className="p-3 bg-sky-50 rounded-lg text-sky-600">
+                  <div className="p-3 bg-amber-50 rounded-lg text-amber-600">
                     <Wrench className="w-5 h-5" />
                   </div>
                   <div>
-                    <span className="block text-[10px] text-slate-400 font-extrabold uppercase tracking-wider">Média de Equipamentos Mobilizados</span>
+                    <span className="block text-[10px] text-slate-400 font-extrabold uppercase tracking-wider">Média Equipamentos Mobilizados</span>
                     <span className="text-lg font-bold text-slate-800">
-                      {Math.round(histogramData.reduce((acc, curr) => acc + curr["Total Equipamentos"], 0) / histogramData.length * 10) / 10} un.
+                      {Math.round(histogramData.reduce((acc, curr) => acc + curr["Total Equipamentos"], 0) / (histogramData.length || 1) * 10) / 10} un.
                     </span>
                   </div>
                 </div>
@@ -1145,19 +1746,321 @@ export const ConsolidatedReports: React.FC = () => {
                     <TrendingUp className="w-5 h-5" />
                   </div>
                   <div>
-                    <span className="block text-[10px] text-slate-400 font-extrabold uppercase tracking-wider">Total de Diários no Período</span>
+                    <span className="block text-[10px] text-slate-400 font-extrabold uppercase tracking-wider">Pico de Efetivo (Obra)</span>
+                    <span className="text-lg font-bold text-purple-700">
+                      {histogramMonthlySummary.maxWorkforceDay} pessoas em 1 dia
+                    </span>
+                  </div>
+                </div>
+
+                <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-xs flex items-center gap-3.5">
+                  <div className="p-3 bg-emerald-50 rounded-lg text-emerald-600">
+                    <FileText className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <span className="block text-[10px] text-slate-400 font-extrabold uppercase tracking-wider">Diários Consolidados</span>
                     <span className="text-lg font-bold text-slate-800">
-                      {filteredReports.length} RDOs consolidados
+                      {filteredReports.length} RDOs apurados
                     </span>
                   </div>
                 </div>
               </div>
 
+              {/* TABELA RESUMO 1: MÃO DE OBRA MENSAL */}
+              <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <Users className="w-4 h-4 text-blue-600" />
+                      <h3 className="font-bold text-sm text-slate-900 uppercase tracking-wide">
+                        Quadro Resumo de Mão de Obra (Distribuição Mensal)
+                      </h3>
+                    </div>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      Lista detalhada dos cargos e funções cadastrados nas abas do RDO separando por Direto (MOD), Indireto (MOI) e Subcontratados.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1.5 text-[11px]">
+                    <span className="px-2 py-0.5 bg-blue-50 text-blue-700 font-bold rounded-md border border-blue-200">
+                      MOD: {histogramMonthlySummary.laborMOD.length} cargos
+                    </span>
+                    <span className="px-2 py-0.5 bg-sky-50 text-sky-700 font-bold rounded-md border border-sky-200">
+                      MOI: {histogramMonthlySummary.laborMOI.length} cargos
+                    </span>
+                    <span className="px-2 py-0.5 bg-purple-50 text-purple-700 font-bold rounded-md border border-purple-200">
+                      Sub: {histogramMonthlySummary.laborSubcontratado.length} cargos
+                    </span>
+                  </div>
+                </div>
+
+                {histogramMonthlySummary.laborList.length === 0 ? (
+                  <p className="text-xs text-slate-400 italic py-4 text-center">Nenhum registro detalhado de mão de Obra encontrado nos RDOs do período.</p>
+                ) : (
+                  <div className="overflow-x-auto rounded-xl border border-slate-200">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead>
+                        <tr className="bg-slate-100/80 text-slate-700 border-b border-slate-200 uppercase text-[10px] font-bold tracking-wider">
+                          <th className="p-2.5">Cargo / Função</th>
+                          <th className="p-2.5">Categoria</th>
+                          <th className="p-2.5">Empresa / Vínculo</th>
+                          {histogramMonthlySummary.monthsFormatted.map(m => (
+                            <th key={m.key} className="p-2.5 text-center bg-slate-200/50">
+                              {m.label}
+                              <span className="block text-[8px] text-slate-400 font-normal uppercase">({m.rdoDays} RDOs)</span>
+                            </th>
+                          ))}
+                          <th className="p-2.5 text-right bg-blue-50/50 text-blue-900">Média Geral</th>
+                          <th className="p-2.5 text-center bg-amber-50/50 text-amber-900">Pico</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-200/70 text-slate-700">
+                        {/* SECTION MOD */}
+                        {histogramMonthlySummary.laborMOD.length > 0 && (
+                          <>
+                            <tr className="bg-blue-50/70 text-blue-950 font-bold text-[11px]">
+                              <td colSpan={5 + histogramMonthlySummary.monthsFormatted.length} className="p-2 border-l-4 border-blue-700 uppercase tracking-wider">
+                                1. Mão de Obra Direta (MOD) - Operacional e Produção SEEL
+                              </td>
+                            </tr>
+                            {histogramMonthlySummary.laborMOD.map((item, idx) => (
+                              <tr key={`mod_${idx}`} className="hover:bg-slate-50 transition-colors">
+                                <td className="p-2.5 font-semibold text-slate-900">{item.cargo}</td>
+                                <td className="p-2.5">
+                                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-800">
+                                    MOD
+                                  </span>
+                                </td>
+                                <td className="p-2.5 text-slate-500 text-[11px]">{item.groupCompany}</td>
+                                {histogramMonthlySummary.monthsFormatted.map(m => (
+                                  <td key={m.key} className="p-2.5 text-center font-bold text-slate-800">
+                                    {item.monthlyAvgs[m.key] > 0 ? item.monthlyAvgs[m.key] : <span className="text-slate-300 font-normal">-</span>}
+                                  </td>
+                                ))}
+                                <td className="p-2.5 text-right font-extrabold text-blue-900 bg-blue-50/30">{item.overallAvg}</td>
+                                <td className="p-2.5 text-center font-bold text-amber-700 bg-amber-50/30">{item.periodPeak}</td>
+                              </tr>
+                            ))}
+                          </>
+                        )}
+
+                        {/* SECTION MOI */}
+                        {histogramMonthlySummary.laborMOI.length > 0 && (
+                          <>
+                            <tr className="bg-sky-50/70 text-sky-950 font-bold text-[11px]">
+                              <td colSpan={5 + histogramMonthlySummary.monthsFormatted.length} className="p-2 border-l-4 border-sky-600 uppercase tracking-wider">
+                                2. Mão de Obra Indireta (MOI) - Gestão, Engenharia e Apoio SEEL
+                              </td>
+                            </tr>
+                            {histogramMonthlySummary.laborMOI.map((item, idx) => (
+                              <tr key={`moi_${idx}`} className="hover:bg-slate-50 transition-colors">
+                                <td className="p-2.5 font-semibold text-slate-900">{item.cargo}</td>
+                                <td className="p-2.5">
+                                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-sky-100 text-sky-800">
+                                    MOI
+                                  </span>
+                                </td>
+                                <td className="p-2.5 text-slate-500 text-[11px]">{item.groupCompany}</td>
+                                {histogramMonthlySummary.monthsFormatted.map(m => (
+                                  <td key={m.key} className="p-2.5 text-center font-bold text-slate-800">
+                                    {item.monthlyAvgs[m.key] > 0 ? item.monthlyAvgs[m.key] : <span className="text-slate-300 font-normal">-</span>}
+                                  </td>
+                                ))}
+                                <td className="p-2.5 text-right font-extrabold text-blue-900 bg-blue-50/30">{item.overallAvg}</td>
+                                <td className="p-2.5 text-center font-bold text-amber-700 bg-amber-50/30">{item.periodPeak}</td>
+                              </tr>
+                            ))}
+                          </>
+                        )}
+
+                        {/* SECTION SUBCONTRATADA */}
+                        {histogramMonthlySummary.laborSubcontratado.length > 0 && (
+                          <>
+                            <tr className="bg-purple-50/70 text-purple-950 font-bold text-[11px]">
+                              <td colSpan={5 + histogramMonthlySummary.monthsFormatted.length} className="p-2 border-l-4 border-purple-600 uppercase tracking-wider">
+                                3. Mão de Obra Subcontratada / Terceirizada
+                              </td>
+                            </tr>
+                            {histogramMonthlySummary.laborSubcontratado.map((item, idx) => (
+                              <tr key={`sub_${idx}`} className="hover:bg-slate-50 transition-colors">
+                                <td className="p-2.5 font-semibold text-slate-900">{item.cargo}</td>
+                                <td className="p-2.5">
+                                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-800">
+                                    Subcontratado
+                                  </span>
+                                </td>
+                                <td className="p-2.5 text-slate-500 text-[11px]">{item.groupCompany}</td>
+                                {histogramMonthlySummary.monthsFormatted.map(m => (
+                                  <td key={m.key} className="p-2.5 text-center font-bold text-slate-800">
+                                    {item.monthlyAvgs[m.key] > 0 ? item.monthlyAvgs[m.key] : <span className="text-slate-300 font-normal">-</span>}
+                                  </td>
+                                ))}
+                                <td className="p-2.5 text-right font-extrabold text-blue-900 bg-blue-50/30">{item.overallAvg}</td>
+                                <td className="p-2.5 text-center font-bold text-amber-700 bg-amber-50/30">{item.periodPeak}</td>
+                              </tr>
+                            ))}
+                          </>
+                        )}
+
+                        {/* SUBTOTAL ROW FOR LABOR */}
+                        <tr className="bg-slate-100 font-bold text-slate-900 border-t-2 border-slate-300">
+                          <td colSpan={3} className="p-2.5 uppercase tracking-wider text-[11px]">
+                            Média Diária Total de Pessoal (MOD + MOI + Sub)
+                          </td>
+                          {histogramMonthlySummary.monthsFormatted.map(m => {
+                            const monthAvgSum = Math.round(histogramMonthlySummary.laborList.reduce((acc, curr) => acc + (curr.monthlyAvgs[m.key] || 0), 0) * 10) / 10;
+                            return (
+                              <td key={m.key} className="p-2.5 text-center font-extrabold text-blue-950">
+                                {monthAvgSum}
+                              </td>
+                            );
+                          })}
+                          <td className="p-2.5 text-right font-black text-blue-900 text-sm bg-blue-100/50">
+                            {Math.round(histogramMonthlySummary.laborList.reduce((acc, curr) => acc + curr.overallAvg, 0) * 10) / 10}
+                          </td>
+                          <td className="p-2.5 text-center font-black text-purple-900 text-sm bg-purple-100/50">
+                            {histogramMonthlySummary.maxWorkforceDay}
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              {/* TABELA RESUMO 2: EQUIPAMENTOS MENSAL */}
+              <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <Wrench className="w-4 h-4 text-amber-600" />
+                      <h3 className="font-bold text-sm text-slate-900 uppercase tracking-wide">
+                        Quadro Resumo de Equipamentos (Distribuição Mensal)
+                      </h3>
+                    </div>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      Frota cadastrada nas abas do RDO separando por Equipamentos Próprios (Direto) e Subcontratados (Terceirizados).
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1.5 text-[11px]">
+                    <span className="px-2 py-0.5 bg-amber-50 text-amber-700 font-bold rounded-md border border-amber-200">
+                      Próprios: {histogramMonthlySummary.equipProprio.length} modelos
+                    </span>
+                    <span className="px-2 py-0.5 bg-sky-50 text-sky-700 font-bold rounded-md border border-sky-200">
+                      Subcontratados: {histogramMonthlySummary.equipSubcontratado.length} modelos
+                    </span>
+                  </div>
+                </div>
+
+                {histogramMonthlySummary.equipList.length === 0 ? (
+                  <p className="text-xs text-slate-400 italic py-4 text-center">Nenhum registro detalhado de equipamentos encontrado nos RDOs do período.</p>
+                ) : (
+                  <div className="overflow-x-auto rounded-xl border border-slate-200">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead>
+                        <tr className="bg-slate-100/80 text-slate-700 border-b border-slate-200 uppercase text-[10px] font-bold tracking-wider">
+                          <th className="p-2.5">Equipamento / Modelo</th>
+                          <th className="p-2.5">Categoria</th>
+                          <th className="p-2.5">Empresa / Fornecedor</th>
+                          {histogramMonthlySummary.monthsFormatted.map(m => (
+                            <th key={m.key} className="p-2.5 text-center bg-slate-200/50">
+                              {m.label}
+                              <span className="block text-[8px] text-slate-400 font-normal uppercase">({m.rdoDays} RDOs)</span>
+                            </th>
+                          ))}
+                          <th className="p-2.5 text-right bg-amber-50/50 text-amber-900">Média Geral</th>
+                          <th className="p-2.5 text-center bg-purple-50/50 text-purple-900">Pico</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-200/70 text-slate-700">
+                        {/* SECTION PROPRIO */}
+                        {histogramMonthlySummary.equipProprio.length > 0 && (
+                          <>
+                            <tr className="bg-amber-50/70 text-amber-950 font-bold text-[11px]">
+                              <td colSpan={5 + histogramMonthlySummary.monthsFormatted.length} className="p-2 border-l-4 border-amber-600 uppercase tracking-wider">
+                                1. Equipamentos Próprios (Patrimônio SEEL)
+                              </td>
+                            </tr>
+                            {histogramMonthlySummary.equipProprio.map((item, idx) => (
+                              <tr key={`eq_prop_${idx}`} className="hover:bg-slate-50 transition-colors">
+                                <td className="p-2.5 font-semibold text-slate-900">{item.equip}</td>
+                                <td className="p-2.5">
+                                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800">
+                                    Próprio
+                                  </span>
+                                </td>
+                                <td className="p-2.5 text-slate-500 text-[11px]">{item.company}</td>
+                                {histogramMonthlySummary.monthsFormatted.map(m => (
+                                  <td key={m.key} className="p-2.5 text-center font-bold text-slate-800">
+                                    {item.monthlyAvgs[m.key] > 0 ? item.monthlyAvgs[m.key] : <span className="text-slate-300 font-normal">-</span>}
+                                  </td>
+                                ))}
+                                <td className="p-2.5 text-right font-extrabold text-amber-900 bg-amber-50/30">{item.overallAvg}</td>
+                                <td className="p-2.5 text-center font-bold text-purple-700 bg-purple-50/30">{item.periodPeak}</td>
+                              </tr>
+                            ))}
+                          </>
+                        )}
+
+                        {/* SECTION SUBCONTRATADO */}
+                        {histogramMonthlySummary.equipSubcontratado.length > 0 && (
+                          <>
+                            <tr className="bg-sky-50/70 text-sky-950 font-bold text-[11px]">
+                              <td colSpan={5 + histogramMonthlySummary.monthsFormatted.length} className="p-2 border-l-4 border-sky-600 uppercase tracking-wider">
+                                2. Equipamentos Subcontratados / Locados
+                              </td>
+                            </tr>
+                            {histogramMonthlySummary.equipSubcontratado.map((item, idx) => (
+                              <tr key={`eq_sub_${idx}`} className="hover:bg-slate-50 transition-colors">
+                                <td className="p-2.5 font-semibold text-slate-900">{item.equip}</td>
+                                <td className="p-2.5">
+                                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-sky-100 text-sky-800">
+                                    Subcontratado
+                                  </span>
+                                </td>
+                                <td className="p-2.5 text-slate-500 text-[11px]">{item.company}</td>
+                                {histogramMonthlySummary.monthsFormatted.map(m => (
+                                  <td key={m.key} className="p-2.5 text-center font-bold text-slate-800">
+                                    {item.monthlyAvgs[m.key] > 0 ? item.monthlyAvgs[m.key] : <span className="text-slate-300 font-normal">-</span>}
+                                  </td>
+                                ))}
+                                <td className="p-2.5 text-right font-extrabold text-amber-900 bg-amber-50/30">{item.overallAvg}</td>
+                                <td className="p-2.5 text-center font-bold text-purple-700 bg-purple-50/30">{item.periodPeak}</td>
+                              </tr>
+                            ))}
+                          </>
+                        )}
+
+                        {/* SUBTOTAL ROW FOR EQUIPMENT */}
+                        <tr className="bg-slate-100 font-bold text-slate-900 border-t-2 border-slate-300">
+                          <td colSpan={3} className="p-2.5 uppercase tracking-wider text-[11px]">
+                            Frota Média Total Mobilizada (Próprios + Terceirizados)
+                          </td>
+                          {histogramMonthlySummary.monthsFormatted.map(m => {
+                            const monthAvgSum = Math.round(histogramMonthlySummary.equipList.reduce((acc, curr) => acc + (curr.monthlyAvgs[m.key] || 0), 0) * 10) / 10;
+                            return (
+                              <td key={m.key} className="p-2.5 text-center font-extrabold text-amber-950">
+                                {monthAvgSum}
+                              </td>
+                            );
+                          })}
+                          <td className="p-2.5 text-right font-black text-amber-900 text-sm bg-amber-100/50">
+                            {Math.round(histogramMonthlySummary.equipList.reduce((acc, curr) => acc + curr.overallAvg, 0) * 10) / 10}
+                          </td>
+                          <td className="p-2.5 text-center font-black text-purple-900 text-sm bg-purple-100/50">
+                            -
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
               {/* Chart: Manpower histogram */}
               <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs space-y-4">
                 <div>
-                  <h3 className="font-bold text-sm text-slate-900 uppercase tracking-wide">Histograma de Mão de Obra</h3>
-                  <p className="text-[11px] text-slate-400 mt-0.5">Evolução do contingente de pessoal próprio (SEEL) e subcontratado</p>
+                  <h3 className="font-bold text-sm text-slate-900 uppercase tracking-wide">Histograma de Mão de Obra (Gráfico)</h3>
+                  <p className="text-[11px] text-slate-400 mt-0.5">Evolução diária do contingente de pessoal próprio (MOD / MOI) e subcontratado</p>
                 </div>
                 <div className="h-80 w-full text-xs">
                   <ResponsiveContainer width="100%" height="100%">
@@ -1178,8 +2081,8 @@ export const ConsolidatedReports: React.FC = () => {
               {/* Chart: Equipment Histogram */}
               <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs space-y-4">
                 <div>
-                  <h3 className="font-bold text-sm text-slate-900 uppercase tracking-wide">Histograma de Equipamentos</h3>
-                  <p className="text-[11px] text-slate-400 mt-0.5">Evolução da frota mobilizada na frentes de trabalho</p>
+                  <h3 className="font-bold text-sm text-slate-900 uppercase tracking-wide">Histograma de Equipamentos (Gráfico)</h3>
+                  <p className="text-[11px] text-slate-400 mt-0.5">Evolução diária da frota mobilizada na frentes de trabalho</p>
                 </div>
                 <div className="h-80 w-full text-xs">
                   <ResponsiveContainer width="100%" height="100%">
