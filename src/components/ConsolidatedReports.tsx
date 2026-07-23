@@ -77,6 +77,7 @@ export const ConsolidatedReports: React.FC = () => {
   const [motivoFilter, setMotivoFilter] = useState<string>("TODOS");
   const [resourceTypeFilter, setResourceTypeFilter] = useState<"TODOS" | "MO" | "EQUIP">("TODOS");
   const [searchQuery, setSearchQuery] = useState<string>("");
+  const [idleChartViewMode, setIdleChartViewMode] = useState<"diario" | "mensal">("diario");
   const [expandedObsMap, setExpandedObsMap] = useState<Record<string, boolean>>({});
 
   // Filter reports of active obra in the selected range
@@ -582,6 +583,68 @@ export const ConsolidatedReports: React.FC = () => {
     });
   }, [idleResourcesData.events, motivoFilter, resourceTypeFilter, searchQuery]);
 
+  // Idle Resources Chart Data (Daily vs Monthly toggle)
+  const idleChartData = useMemo(() => {
+    const dailyMap: Record<string, { date: string; label: string; hh: number; he: number; hours: number; count: number }> = {};
+    const monthlyMap: Record<string, { monthKey: string; label: string; hh: number; he: number; hours: number; count: number }> = {};
+
+    filteredIdleEvents.forEach(ev => {
+      // 1. Daily Map
+      const dateStr = ev.data; // "YYYY-MM-DD"
+      if (dateStr) {
+        if (!dailyMap[dateStr]) {
+          const parts = dateStr.split("-");
+          const formattedLabel = parts.length === 3 ? `${parts[2]}/${parts[1]}` : dateStr;
+          dailyMap[dateStr] = { date: dateStr, label: formattedLabel, hh: 0, he: 0, hours: 0, count: 0 };
+        }
+        dailyMap[dateStr].hh += ev.totalHH;
+        dailyMap[dateStr].he += ev.totalHE;
+        dailyMap[dateStr].hours += ev.totalHours;
+        dailyMap[dateStr].count += 1;
+      }
+
+      // 2. Monthly Map
+      const monthKey = dateStr ? dateStr.substring(0, 7) : "Indefinido"; // "YYYY-MM"
+      if (!monthlyMap[monthKey]) {
+        const parts = monthKey.split("-");
+        const formattedLabel = parts.length === 2 ? `${parts[1]}/${parts[0]}` : monthKey;
+        monthlyMap[monthKey] = { monthKey, label: formattedLabel, hh: 0, he: 0, hours: 0, count: 0 };
+      }
+      monthlyMap[monthKey].hh += ev.totalHH;
+      monthlyMap[monthKey].he += ev.totalHE;
+      monthlyMap[monthKey].hours += ev.totalHours;
+      monthlyMap[monthKey].count += 1;
+    });
+
+    const dailyList = Object.values(dailyMap)
+      .sort((a, b) => a.date.localeCompare(b.date))
+      .map(item => ({
+        name: item.label,
+        fullDate: item.date.split("-").reverse().join("/"),
+        "Horas-Homem (HH)": Math.round(item.hh * 10) / 10,
+        "Horas-Equipamento (HE)": Math.round(item.he * 10) / 10,
+        "Total Horas Paralisadas": Math.round(item.hours * 10) / 10,
+        count: item.count
+      }));
+
+    const monthlyList = Object.values(monthlyMap)
+      .sort((a, b) => a.monthKey.localeCompare(b.monthKey))
+      .map(item => ({
+        name: item.label,
+        fullDate: item.label,
+        "Horas-Homem (HH)": Math.round(item.hh * 10) / 10,
+        "Horas-Equipamento (HE)": Math.round(item.he * 10) / 10,
+        "Total Horas Paralisadas": Math.round(item.hours * 10) / 10,
+        count: item.count
+      }));
+
+    return {
+      dailyList,
+      monthlyList,
+      currentList: idleChartViewMode === "diario" ? dailyList : monthlyList
+    };
+  }, [filteredIdleEvents, idleChartViewMode]);
+
   // Printable Claim Report (PDF / Window Print)
   const handlePrintClaimReport = () => {
     if (filteredIdleEvents.length === 0) return;
@@ -654,6 +717,50 @@ export const ConsolidatedReports: React.FC = () => {
 
           <div style="margin-bottom: 12px; font-size: 10px; color: #475569;">
             Total de <strong>${filteredIdleEvents.length}</strong> evento(s) registrado(s) no Diário de Obra (RDO) para embasamento de repactuação contratual, prorrogação de prazo (EOT) e custos de ociosidade.
+          </div>
+
+          <!-- HISTÓRICO DE OCIOSIDADE (DIÁRIO / MENSAL) -->
+          <div style="margin-top: 10px; margin-bottom: 16px; border: 1px solid #cbd5e1; border-radius: 6px; padding: 12px; background: #ffffff;">
+            <div style="font-size: 11px; font-weight: bold; color: #004899; text-transform: uppercase; margin-bottom: 4px; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px; display: flex; justify-content: space-between; align-items: center;">
+              <span>HISTÓRICO ${idleChartViewMode === "diario" ? "DIÁRIO" : "MENSAL"} DE RECURSOS OCIOSOS (HH E HE)</span>
+              <span style="font-size: 9px; color: #004899; font-weight: bold; background: #eff6ff; border: 1px solid #bfdbfe; padding: 2px 6px; border-radius: 4px;">VISÃO ${idleChartViewMode.toUpperCase()}</span>
+            </div>
+            
+            <div style="font-size: 9.5px; color: #64748b; margin-bottom: 10px;">
+              Apuração ${idleChartViewMode === "diario" ? "dia a dia" : "mês a mês"} das horas de paralisação e do impacto em Mão de Obra (HH) e Equipamentos (HE).
+            </div>
+
+            ${idleChartData.currentList.length > 0 ? `
+              <table style="width: 100%; border-collapse: collapse; font-size: 9.5px;">
+                <thead>
+                  <tr style="background: #f1f5f9; text-align: left;">
+                    <th style="padding: 5px; border: 1px solid #cbd5e1;">${idleChartViewMode === "diario" ? "Data" : "Mês / Ano"}</th>
+                    <th style="padding: 5px; border: 1px solid #cbd5e1; text-align: center;">Ocorrências</th>
+                    <th style="padding: 5px; border: 1px solid #cbd5e1; text-align: right;">Horas-Homem (HH)</th>
+                    <th style="padding: 5px; border: 1px solid #cbd5e1; text-align: right;">Horas-Equipamento (HE)</th>
+                    <th style="padding: 5px; border: 1px solid #cbd5e1; text-align: right;">Horas Paralisadas (Total)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${idleChartData.currentList.map(item => `
+                    <tr>
+                      <td style="padding: 4px 6px; border: 1px solid #e2e8f0; font-weight: bold; color: #0f172a;">${item.fullDate || item.name}</td>
+                      <td style="padding: 4px 6px; border: 1px solid #e2e8f0; text-align: center; font-weight: 600;">${item.count}</td>
+                      <td style="padding: 4px 6px; border: 1px solid #e2e8f0; text-align: right; color: #d97706; font-weight: bold;">${item["Horas-Homem (HH)"].toFixed(1)} HH</td>
+                      <td style="padding: 4px 6px; border: 1px solid #e2e8f0; text-align: right; color: #0284c7; font-weight: bold;">${item["Horas-Equipamento (HE)"].toFixed(1)} HE</td>
+                      <td style="padding: 4px 6px; border: 1px solid #e2e8f0; text-align: right; color: #b45309; font-weight: bold;">${item["Total Horas Paralisadas"].toFixed(1)} h</td>
+                    </tr>
+                  `).join('')}
+                  <tr style="background: #f8fafc; font-weight: bold;">
+                    <td style="padding: 6px; border: 1px solid #cbd5e1; font-weight: 800;">TOTAL DO PERÍODO</td>
+                    <td style="padding: 6px; border: 1px solid #cbd5e1; text-align: center;">${filteredIdleEvents.length}</td>
+                    <td style="padding: 6px; border: 1px solid #cbd5e1; text-align: right; color: #d97706; font-weight: 800;">${idleResourcesData.aggregateHH.toFixed(1)} HH</td>
+                    <td style="padding: 6px; border: 1px solid #cbd5e1; text-align: right; color: #0284c7; font-weight: 800;">${idleResourcesData.aggregateHE.toFixed(1)} HE</td>
+                    <td style="padding: 6px; border: 1px solid #cbd5e1; text-align: right; color: #b45309; font-weight: 800;">${filteredIdleEvents.reduce((acc, ev) => acc + ev.totalHours, 0).toFixed(1)} h</td>
+                  </tr>
+                </tbody>
+              </table>
+            ` : `<div style="text-align: center; color: #94a3b8; font-style: italic; padding: 10px;">Nenhum registro de ociosidade no período.</div>`}
           </div>
 
           <!-- QUADRO RESUMO DE OCIOSIDADE E CUSTOS DE PARALISAÇÃO -->
@@ -1505,7 +1612,75 @@ export const ConsolidatedReports: React.FC = () => {
                 </div>
               </div>
 
-              {/* Chart: Impact by Reason */}
+              {/* Chart 1: Time Evolution of Idle Resources (Diário / Mensal Toggle) */}
+              <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-2xs space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                  <div>
+                    <h4 className="text-xs font-extrabold text-slate-800 uppercase tracking-wider flex items-center gap-2">
+                      <TrendingUp className="w-4 h-4 text-amber-600" />
+                      {idleChartViewMode === "diario" 
+                        ? "Evolução Diária de Recursos Ociosos (HH e HE)" 
+                        : "Evolução Mensal de Recursos Ociosos (HH e HE)"}
+                    </h4>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      {idleChartViewMode === "diario"
+                        ? "Histórico diário do somatório de HH (Horas-Homem) e HE (Horas-Equipamento) afetados por paralisações."
+                        : "Consolidação mensal do somatório de HH (Horas-Homem) e HE (Horas-Equipamento) afetados por paralisações."}
+                    </p>
+                  </div>
+
+                  {/* Toggle Buttons: Diário vs Mensal */}
+                  <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200/80 shadow-2xs">
+                    <button
+                      type="button"
+                      onClick={() => setIdleChartViewMode("diario")}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition-all cursor-pointer ${
+                        idleChartViewMode === "diario"
+                          ? "bg-amber-600 text-white shadow-2xs"
+                          : "text-slate-600 hover:text-slate-900"
+                      }`}
+                    >
+                      Visão Diária
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIdleChartViewMode("mensal")}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition-all cursor-pointer ${
+                        idleChartViewMode === "mensal"
+                          ? "bg-amber-600 text-white shadow-2xs"
+                          : "text-slate-600 hover:text-slate-900"
+                      }`}
+                    >
+                      Visão Mensal
+                    </button>
+                  </div>
+                </div>
+
+                <div className="h-64 w-full">
+                  {idleChartData.currentList.length > 0 ? (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={idleChartData.currentList} margin={{ top: 10, right: 30, left: 0, bottom: 20 }}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                        <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
+                        <YAxis tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
+                        <Tooltip 
+                          contentStyle={{ backgroundColor: '#0f172a', borderRadius: '8px', color: '#fff', fontSize: '11px', border: 'none' }}
+                          itemStyle={{ color: '#fff' }}
+                        />
+                        <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
+                        <Bar dataKey="Horas-Homem (HH)" fill="#d97706" radius={[4, 4, 0, 0]} />
+                        <Bar dataKey="Horas-Equipamento (HE)" fill="#0284c7" radius={[4, 4, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="h-full flex flex-col items-center justify-center text-slate-400 text-xs italic">
+                      Nenhum registro de ociosidade no período selecionado.
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Chart 2: Impact by Reason */}
               {idleResourcesData.chartDataByReason.length > 0 && (
                 <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-2xs space-y-4">
                   <div className="flex items-center justify-between border-b border-slate-100 pb-3">
