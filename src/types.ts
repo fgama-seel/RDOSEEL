@@ -118,7 +118,7 @@ export interface RdoReport {
   obra: string;
   obraId?: string; // Links to the ObraConfig
   anexos?: { id: string, dataUrl: string, name?: string, type?: string }[]; // base64 images or PDFs
-  status?: "Em Digitação" | "Enviado para Fiscalização" | "Finalizado" | "Assinado" | "Cancelado";
+  status?: "Em Digitação" | "Enviado para Fiscalização" | "Finalizado" | "Assinado" | "Cancelado" | string;
   creatorEmail?: string;
   cliente: string;
   contratada?: string; // Main contractor (e.g., SEEL)

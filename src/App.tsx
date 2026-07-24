@@ -72,7 +72,7 @@ function AppContent() {
   const canCreateRdo = isGlobalAdmin || (accessLevel !== "view" && accessLevel !== "fiscalizacao" && accessLevel !== "gerenciadora");
 
   const [searchTerm, setSearchTerm] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"todos" | "Em Digitação" | "Finalizado" | "Assinado">("todos");
+  const [statusFilter, setStatusFilter] = useState<"todos" | "Em Digitação" | "Pendente" | "Finalizado" | "Assinado">("todos");
   const [activeView, setActiveView] = useState<"rdo" | "relatorios" | "auditoria">("rdo");
   const [showPrintView, setShowPrintView] = useState(false);
   const [showNotificationsPopover, setShowNotificationsPopover] = useState(false);
@@ -129,10 +129,22 @@ function AppContent() {
     const matchesSearch = (r.rdoNo || "").toLowerCase().includes((searchTerm || "").toLowerCase()) ||
                           (r.obra || "").toLowerCase().includes((searchTerm || "").toLowerCase()) ||
                           (r.data || "").includes(searchTerm || "");
-    const matchesStatus = statusFilter === "todos" || 
-      (statusFilter === "Assinado" 
-        ? (r.status === "Assinado" || Boolean(r.emitenteAssinado) || Boolean(r.gerenciadoraAssinado) || Boolean(r.contratanteAssinado))
-        : (r.status || "Em Digitação") === statusFilter);
+    
+    const signedCount = (r.emitenteAssinado ? 1 : 0) + (r.gerenciadoraAssinado ? 1 : 0) + (r.contratanteAssinado ? 1 : 0);
+    
+    let matchesStatus = false;
+    if (statusFilter === "todos") {
+      matchesStatus = true;
+    } else if (statusFilter === "Em Digitação") {
+      matchesStatus = (r.status || "Em Digitação") === "Em Digitação" && signedCount === 0;
+    } else if (statusFilter === "Pendente") {
+      matchesStatus = (signedCount > 0 && signedCount < 3) || (r.status || "").includes("Assinaturas Pendentes");
+    } else if (statusFilter === "Finalizado") {
+      matchesStatus = (r.status === "Finalizado" || r.status === "Enviado para Fiscalização") && signedCount === 0;
+    } else if (statusFilter === "Assinado") {
+      matchesStatus = signedCount === 3 || r.status === "Assinado" || signedCount > 0;
+    }
+
     if (currentObra) {
       return matchesSearch && matchesStatus && r.obraId === currentObra.id;
     }
@@ -391,10 +403,10 @@ function AppContent() {
             </div>
 
             {/* Filtro de Status RDO */}
-            <div className="grid grid-cols-4 gap-1 bg-slate-950/50 p-1 rounded border border-slate-800">
+            <div className="grid grid-cols-5 gap-0.5 bg-slate-950/50 p-1 rounded border border-slate-800">
               <button
                 onClick={() => setStatusFilter("todos")}
-                className={`py-1 rounded text-[8.5px] uppercase font-bold transition-all border-none cursor-pointer leading-tight ${
+                className={`py-1 rounded text-[8px] uppercase font-bold transition-all border-none cursor-pointer leading-tight ${
                   statusFilter === "todos"
                     ? "bg-amber-500 text-slate-950 font-black shadow-sm"
                     : "text-slate-400 hover:text-white"
@@ -404,7 +416,7 @@ function AppContent() {
               </button>
               <button
                 onClick={() => setStatusFilter("Em Digitação")}
-                className={`py-1 rounded text-[8.5px] uppercase font-bold transition-all border-none cursor-pointer leading-tight ${
+                className={`py-1 rounded text-[8px] uppercase font-bold transition-all border-none cursor-pointer leading-tight ${
                   statusFilter === "Em Digitação"
                     ? "bg-amber-400 text-slate-950 font-black shadow-sm"
                     : "text-slate-400 hover:text-white"
@@ -413,8 +425,19 @@ function AppContent() {
                 Digitação
               </button>
               <button
+                onClick={() => setStatusFilter("Pendente")}
+                className={`py-1 rounded text-[8px] uppercase font-bold transition-all border-none cursor-pointer leading-tight ${
+                  statusFilter === "Pendente"
+                    ? "bg-amber-500 text-slate-950 font-black shadow-sm"
+                    : "text-slate-400 hover:text-white"
+                }`}
+                title="RDOs com uma ou mais assinaturas pendentes"
+              >
+                Pendente
+              </button>
+              <button
                 onClick={() => setStatusFilter("Finalizado")}
-                className={`py-1 rounded text-[8.5px] uppercase font-bold transition-all border-none cursor-pointer leading-tight ${
+                className={`py-1 rounded text-[8px] uppercase font-bold transition-all border-none cursor-pointer leading-tight ${
                   statusFilter === "Finalizado"
                     ? "bg-emerald-500 text-slate-950 font-black shadow-sm"
                     : "text-slate-400 hover:text-white"
@@ -424,7 +447,7 @@ function AppContent() {
               </button>
               <button
                 onClick={() => setStatusFilter("Assinado")}
-                className={`py-1 rounded text-[8.5px] uppercase font-bold transition-all border-none cursor-pointer leading-tight ${
+                className={`py-1 rounded text-[8px] uppercase font-bold transition-all border-none cursor-pointer leading-tight ${
                   statusFilter === "Assinado"
                     ? "bg-sky-500 text-slate-950 font-black shadow-sm"
                     : "text-slate-400 hover:text-white"
@@ -460,6 +483,21 @@ function AppContent() {
                 filteredReports.map((report) => {
                   const isSelected = currentReport?.id === report.id;
                   const totalRain = report.precipitacao?.total || 0;
+                  const signedCount = (report.emitenteAssinado ? 1 : 0) + (report.gerenciadoraAssinado ? 1 : 0) + (report.contratanteAssinado ? 1 : 0);
+
+                  let statusText = report.status || "Em Digitação";
+                  let statusBadgeClass = "text-amber-400 bg-amber-500/10 border border-amber-500/20";
+
+                  if (signedCount === 3 || report.status === "Assinado") {
+                    statusText = "Assinado (3/3)";
+                    statusBadgeClass = "text-sky-400 bg-sky-500/10 border border-sky-500/20 font-bold";
+                  } else if (signedCount > 0) {
+                    statusText = `Assinaturas Pendentes (${signedCount}/3)`;
+                    statusBadgeClass = "text-amber-400 bg-amber-500/10 border border-amber-500/20 font-extrabold";
+                  } else if (report.status === "Finalizado" || report.status === "Enviado para Fiscalização") {
+                    statusText = report.status === "Finalizado" ? "Fechado" : report.status;
+                    statusBadgeClass = "text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 font-bold";
+                  }
                   
                   return (
                     <div
@@ -479,14 +517,8 @@ function AppContent() {
                           <span className={`text-xs font-bold font-mono tracking-wider ${isSelected ? "text-white" : "text-slate-300"}`}>
                             {report.rdoNo}
                           </span>
-                          <span className={`text-[8px] font-bold uppercase tracking-wider ${
-                            (report.status || "Em Digitação") === "Assinado"
-                              ? "text-sky-400 bg-sky-500/10 border border-sky-500/20"
-                              : (report.status || "Em Digitação") === "Finalizado" 
-                                ? "text-emerald-400 bg-emerald-500/10 border border-emerald-500/20" 
-                                : "text-amber-400 bg-amber-500/10 border border-amber-500/20"
-                          } px-1 rounded w-fit`}>
-                            {report.status || "Em Digitação"}
+                          <span className={`text-[8px] uppercase tracking-wider ${statusBadgeClass} px-1 rounded w-fit`}>
+                            {statusText}
                           </span>
                         </div>
                         <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded flex items-center gap-1 leading-none ${
