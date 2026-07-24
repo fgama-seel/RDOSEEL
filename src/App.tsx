@@ -11,6 +11,7 @@ import { RdoPrintView } from "./components/RdoPrintView";
 import { ObraManagerModal } from "./components/ObraManagerModal";
 import { ConsolidatedReports } from "./components/ConsolidatedReports";
 import { AuditoriaTab } from "./components/AuditoriaTab";
+import { BatchSignModal } from "./components/BatchSignModal";
 import { RdoReport } from "./types";
 import { 
   HardHat, 
@@ -28,7 +29,8 @@ import {
   Calendar,
   Printer,
   BarChart3,
-  Bell
+  Bell,
+  FileSignature
 } from "lucide-react";
 
 // Formatting helper
@@ -81,6 +83,7 @@ function AppContent() {
     r.hasCommentNotification && (!currentObra || r.obraId === currentObra.id)
   );
   const [showBatchPrint, setShowBatchPrint] = useState(false);
+  const [showBatchSignModal, setShowBatchSignModal] = useState(false);
   const [showBatchPrintConfig, setShowBatchPrintConfig] = useState(false);
   const [batchStartDate, setBatchStartDate] = useState("");
   const [batchEndDate, setBatchEndDate] = useState("");
@@ -214,6 +217,13 @@ function AppContent() {
             >
               <BarChart3 className="w-3.5 h-3.5" />
               Relatórios Gerenciais
+            </button>
+            <button
+              onClick={() => setShowBatchSignModal(true)}
+              className="px-3 h-8 rounded-md text-[10px] font-extrabold uppercase tracking-wider transition-all border-none cursor-pointer flex items-center gap-1.5 text-slate-600 hover:text-amber-600 hover:bg-amber-50/80 bg-slate-200/50"
+            >
+              <FileSignature className="w-3.5 h-3.5 text-amber-600" />
+              Assinar em Lote
             </button>
             {isGlobalAdmin && (
               <button
@@ -380,7 +390,7 @@ function AppContent() {
           </div>
 
           {/* Create Button & Search bar */}
-          <div className="p-4 pt-3 border-b border-slate-850 space-y-3 shrink-0 bg-slate-950/20">
+          <div className="p-4 pt-3 border-b border-slate-850 space-y-2 shrink-0 bg-slate-950/20">
             {canCreateRdo && (
               <button
                 onClick={handleCreateNewRdo}
@@ -390,6 +400,14 @@ function AppContent() {
                 NOVO DIÁRIO DE OBRA (RDO)
               </button>
             )}
+
+            <button
+              onClick={() => setShowBatchSignModal(true)}
+              className="w-full h-8 bg-slate-800 hover:bg-slate-700 text-amber-400 border border-slate-700/80 rounded font-bold text-[11px] tracking-wide flex items-center justify-center gap-1.5 transition-all outline-none cursor-pointer"
+            >
+              <FileSignature className="w-3.5 h-3.5 text-amber-500" />
+              ASSINAR EM LOTE
+            </button>
 
             <div className="relative">
               <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-2.5" />
@@ -759,6 +777,17 @@ function AppContent() {
       <ObraManagerModal 
         isOpen={showObraManager} 
         onClose={() => setShowObraManager(false)} 
+      />
+
+      {/* 6. BATCH SIGNATURE MODAL */}
+      <BatchSignModal
+        isOpen={showBatchSignModal}
+        onClose={() => setShowBatchSignModal(false)}
+        reports={reports}
+        currentObra={currentObra}
+        user={user}
+        accessLevel={accessLevel}
+        saveReport={saveReport}
       />
 
     </div>
