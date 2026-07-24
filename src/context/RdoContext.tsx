@@ -696,13 +696,20 @@ export const RdoProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           status: "Em Digitação",
           creatorEmail: user?.email || "",
           fiscalizacaoFinalizada: false,
+          gerenciadoraFinalizada: false,
           emitenteAssinado: false,
+          gerenciadoraAssinado: false,
           contratanteAssinado: false,
           prazoIncorrido: incorrido,
           prazoFaltante: faltante,
-          // Reset signature parameters as they need separate flow
+          // Reset signature parameters with current default names for new RDOs
+          emitenteNome: currentObra.emissorNomeDefault || "",
           emitenteConsolidado: "",
           emitenteHash: "",
+          gerenciadoraNome: currentObra.fiscalGerenciadoraNomeDefault || "",
+          gerenciadoraConsolidado: "",
+          gerenciadoraHash: "",
+          contratanteNome: currentObra.fiscalAprovadorNomeDefault || "",
           contratanteAprovado: "",
           contratanteHash: "",
           createdAt: undefined,
@@ -822,10 +829,13 @@ export const RdoProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         comentariosGerenciadoraContratante: [],
         comentariosFiscalizacao: [],
         comentariosGerenciadora: [],
-        emitenteNome: "",
+        emitenteNome: currentObra.emissorNomeDefault || "",
         emitenteConsolidado: "",
         emitenteHash: "ff2b2060a7b8e8ae496a9553579effac",
-        contratanteNome: "",
+        gerenciadoraNome: currentObra.fiscalGerenciadoraNomeDefault || "",
+        gerenciadoraConsolidado: "",
+        gerenciadoraHash: "",
+        contratanteNome: currentObra.fiscalAprovadorNomeDefault || "",
         contratanteAprovado: "",
         contratanteHash: "29381edd9b0233ff2655f9571859320a"
       };
@@ -934,6 +944,71 @@ export const RdoProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       permissoesEmails: permissionsEmails,
       updatedAt: new Date().toISOString(),
     };
+
+    // Update ONLY non-signed reports for this Obra with updated default signer names (signed reports are preserved)
+    const targetObraId = obraToSave.id;
+    const targetObraName = obraToSave.nome;
+    const reportsToUpdateBatch: RdoReport[] = [];
+
+    const updatedReportsList = reports.map(r => {
+      const isSameObra = (targetObraId && r.obraId === targetObraId) || (targetObraName && r.obra === targetObraName);
+      if (!isSameObra) return r;
+
+      let rChanged = false;
+      const updatedR = { ...r };
+
+      // 1. Emitente: update ONLY if NOT signed
+      if (!r.emitenteAssinado) {
+        if (updatedR.emitenteNome !== (obraToSave.emissorNomeDefault || "")) {
+          updatedR.emitenteNome = obraToSave.emissorNomeDefault || "";
+          rChanged = true;
+        }
+      }
+
+      // 2. Gerenciadora: update ONLY if NOT signed
+      if (!r.gerenciadoraAssinado) {
+        if (updatedR.gerenciadoraNome !== (obraToSave.fiscalGerenciadoraNomeDefault || "")) {
+          updatedR.gerenciadoraNome = obraToSave.fiscalGerenciadoraNomeDefault || "";
+          rChanged = true;
+        }
+      }
+
+      // 3. Contratante / Fiscalização: update ONLY if NOT signed
+      if (!r.contratanteAssinado) {
+        if (updatedR.contratanteNome !== (obraToSave.fiscalAprovadorNomeDefault || "")) {
+          updatedR.contratanteNome = obraToSave.fiscalAprovadorNomeDefault || "";
+          rChanged = true;
+        }
+      }
+
+      if (rChanged) {
+        reportsToUpdateBatch.push(updatedR);
+        return updatedR;
+      }
+      return r;
+    });
+
+    if (reportsToUpdateBatch.length > 0) {
+      setReports(updatedReportsList);
+      if (currentReport) {
+        const foundCurr = updatedReportsList.find(x => x.id === currentReport.id);
+        if (foundCurr) setCurrentReport(foundCurr);
+      }
+      if (activeIsFirebase && db) {
+        try {
+          for (const repToSave of reportsToUpdateBatch) {
+            if (repToSave.id) {
+              const docRef = doc(db, "rdos", repToSave.id);
+              await setDoc(docRef, JSON.parse(JSON.stringify(repToSave)));
+            }
+          }
+        } catch (err) {
+          console.error("Erro ao atualizar RDOs não assinados no Firestore:", err);
+        }
+      } else {
+        localStorage.setItem(LOCAL_REPORTS_KEY, JSON.stringify(updatedReportsList));
+      }
+    }
 
     if (activeIsFirebase && db) {
       const path = "obras";
