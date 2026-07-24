@@ -16,6 +16,8 @@ import {
 } from "lucide-react";
 import { RdoReport, ObraConfig } from "../types";
 
+type SignatureRole = "emitente" | "gerenciadora" | "contratante";
+
 interface BatchSignModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -41,7 +43,7 @@ export const BatchSignModal: React.FC<BatchSignModalProps> = ({
   const [filterMode, setFilterMode] = useState<"nao_assinados" | "assinados">("nao_assinados");
 
   // 2. Signature role automatically determined by access level (user cannot change)
-  const selectedRole = useMemo<"emitente" | "gerenciadora" | "contratante font-bold" extends string ? "emitente" | "gerenciadora" | "contratante" : "emitente" | "gerenciadora" | "contratante">(() => {
+  const selectedRole = useMemo<SignatureRole>(() => {
     if (accessLevel === "fiscalizacao") return "contratante";
     if (accessLevel === "gerenciadora") return "gerenciadora";
     return "emitente";
@@ -49,23 +51,21 @@ export const BatchSignModal: React.FC<BatchSignModalProps> = ({
 
   // 3. Signer Name Input
   const defaultSignerName = useMemo(() => {
-    if (selectedRole === "emitente") return currentObra?.emissorNomeDefault || "Engenheiro Responsável";
-    if (selectedRole === "gerenciadora") return currentObra?.fiscalGerenciadoraNomeDefault || currentObra?.gerenciadora || "Fiscal / Gerenciadora";
-    return currentObra?.fiscalAprovadorNomeDefault || currentObra?.cliente || "Fiscal Contratante";
-  }, [selectedRole, currentObra]);
+    if (selectedRole === "emitente") {
+      return currentObra?.emissorNomeDefault || user?.displayName || user?.email || "Engenheiro Responsável";
+    }
+    if (selectedRole === "gerenciadora") {
+      return currentObra?.fiscalGerenciadoraNomeDefault || currentObra?.gerenciadora || user?.displayName || user?.email || "Fiscal / Gerenciadora";
+    }
+    return currentObra?.fiscalAprovadorNomeDefault || currentObra?.cliente || user?.displayName || user?.email || "Fiscal Contratante";
+  }, [selectedRole, currentObra, user]);
 
   const [signerName, setSignerName] = useState(defaultSignerName);
 
-  // Sync signerName whenever role or obra changes
+  // Sync signerName whenever defaultSignerName changes
   React.useEffect(() => {
-    if (selectedRole === "emitente") {
-      setSignerName(currentObra?.emissorNomeDefault || "Engenheiro Responsável");
-    } else if (selectedRole === "gerenciadora") {
-      setSignerName(currentObra?.fiscalGerenciadoraNomeDefault || currentObra?.gerenciadora || "Fiscal / Gerenciadora");
-    } else {
-      setSignerName(currentObra?.fiscalAprovadorNomeDefault || currentObra?.cliente || "Fiscal Contratante");
-    }
-  }, [selectedRole, currentObra]);
+    setSignerName(defaultSignerName);
+  }, [defaultSignerName]);
 
   // 4. Date and Search filters
   const [startDate, setStartDate] = useState("");
@@ -77,11 +77,8 @@ export const BatchSignModal: React.FC<BatchSignModalProps> = ({
   const [isProcessing, setIsProcessing] = useState(false);
   const [progressMsg, setProgressMsg] = useState("");
 
-  // Feedback toast message state (removes dependency on native alert/confirm)
+  // Feedback toast message state
   const [toastFeedback, setToastFeedback] = useState<{ type: "success" | "error" | "warning"; msg: string } | null>(null);
-
-  // Custom Confirmation Dialog state
-  const [confirmModal, setConfirmModal] = useState<"sign" | "unsign" | null>(null);
 
   // Filter reports belonging to active obra
   const obraReports = useMemo(() => {
@@ -90,7 +87,7 @@ export const BatchSignModal: React.FC<BatchSignModalProps> = ({
   }, [reports, currentObra]);
 
   // Helper to check if signed for selectedRole
-  const isSignedByRole = (r: RdoReport, role: "emitente" | "gerenciadora" | "contratante") => {
+  const isSignedByRole = (r: RdoReport, role: SignatureRole) => {
     if (role === "emitente") return Boolean(r.emitenteAssinado);
     if (role === "gerenciadora") return Boolean(r.gerenciadoraAssinado);
     return Boolean(r.contratanteAssinado);
@@ -160,35 +157,18 @@ export const BatchSignModal: React.FC<BatchSignModalProps> = ({
     return `${d}/${m}/${y}`;
   };
 
-  // Trigger Sign Button Click -> Validates & opens Custom Confirmation Modal
-  const handleOpenSignConfirm = () => {
+  // Action: Execute Batch Sign (Assinar em Lote)
+  const executeBatchSign = async () => {
     setToastFeedback(null);
+
     if (selectedIds.length === 0) {
       setToastFeedback({ type: "warning", msg: "Por favor, selecione ao menos um RDO na lista para assinar." });
       return;
     }
-    if (!signerName?.trim()) {
-      setToastFeedback({ type: "warning", msg: "Por favor, informe o nome do signatário responsável." });
-      return;
-    }
-    setConfirmModal("sign");
-  };
 
-  // Trigger Unsign Button Click -> Validates & opens Custom Confirmation Modal
-  const handleOpenUnsignConfirm = () => {
-    setToastFeedback(null);
-    if (selectedIds.length === 0) {
-      setToastFeedback({ type: "warning", msg: "Por favor, selecione ao menos um RDO na lista para remover a assinatura." });
-      return;
-    }
-    setConfirmModal("unsign");
-  };
+    const activeSignerName = signerName.trim() || defaultSignerName || "Signatário Responsável";
 
-  // Action: Execute Batch Sign (Assinar em Lote)
-  const executeBatchSign = async () => {
-    setConfirmModal(null);
     setIsProcessing(true);
-    setToastFeedback(null);
     let successCount = 0;
 
     try {
@@ -216,8 +196,8 @@ export const BatchSignModal: React.FC<BatchSignModalProps> = ({
           updated = {
             ...updated,
             emitenteAssinado: true,
-            emitenteNome: signerName.trim(),
-            emitenteConsolidado: `Assinado digitalmente por ${signerName.trim()} (${userEmail}) em ${formattedDate} às ${formattedTime}`,
+            emitenteNome: activeSignerName,
+            emitenteConsolidado: `Assinado digitalmente por ${activeSignerName} (${userEmail}) em ${formattedDate} às ${formattedTime}`,
             emitenteHash: uniqueHash,
             hasCommentNotification: false,
             status: newStatus
@@ -229,7 +209,7 @@ export const BatchSignModal: React.FC<BatchSignModalProps> = ({
           updated = {
             ...updated,
             gerenciadoraAssinado: true,
-            gerenciadoraConsolidado: `Assinado digitalmente por ${signerName.trim()} (${userEmail}) em ${formattedDate} às ${formattedTime}`,
+            gerenciadoraConsolidado: `Assinado digitalmente por ${activeSignerName} (${userEmail}) em ${formattedDate} às ${formattedTime}`,
             gerenciadoraHash: uniqueHash,
             commentNotificationDate: new Date().toISOString(),
             commentNotificationSource: "Gerenciadora",
@@ -242,7 +222,7 @@ export const BatchSignModal: React.FC<BatchSignModalProps> = ({
           updated = {
             ...updated,
             contratanteAssinado: true,
-            contratanteAprovado: `Aprovado e assinado digitalmente por ${signerName.trim()} (${userEmail}) em ${formattedDate} às ${formattedTime}`,
+            contratanteAprovado: `Aprovado e assinado digitalmente por ${activeSignerName} (${userEmail}) em ${formattedDate} às ${formattedTime}`,
             contratanteHash: uniqueHash,
             commentNotificationDate: new Date().toISOString(),
             commentNotificationSource: "Fiscalização",
@@ -256,14 +236,14 @@ export const BatchSignModal: React.FC<BatchSignModalProps> = ({
 
       setToastFeedback({
         type: "success",
-        msg: `Sucesso! ${successCount} RDOs foram assinados digitalmente em lote. Cada documento recebeu seu código hash individual.`
+        msg: `Sucesso! ${successCount} RDO(s) foram assinados digitalmente em lote.`
       });
       setSelectedIds([]);
     } catch (err: any) {
       console.error("Erro na assinatura em lote:", err);
       setToastFeedback({
         type: "error",
-        msg: "Ocorreu um erro durante a assinatura em lote: " + err.message
+        msg: "Ocorreu um erro durante a assinatura em lote: " + (err.message || err)
       });
     } finally {
       setIsProcessing(false);
@@ -273,9 +253,14 @@ export const BatchSignModal: React.FC<BatchSignModalProps> = ({
 
   // Action: Execute Batch Unsign / Remove Signature
   const executeBatchUnsign = async () => {
-    setConfirmModal(null);
-    setIsProcessing(true);
     setToastFeedback(null);
+
+    if (selectedIds.length === 0) {
+      setToastFeedback({ type: "warning", msg: "Por favor, selecione ao menos um RDO na lista para remover a assinatura." });
+      return;
+    }
+
+    setIsProcessing(true);
     let successCount = 0;
 
     try {
@@ -328,14 +313,14 @@ export const BatchSignModal: React.FC<BatchSignModalProps> = ({
 
       setToastFeedback({
         type: "success",
-        msg: `Sucesso! Assinaturas removidas de ${successCount} RDOs em lote.`
+        msg: `Sucesso! Assinaturas removidas de ${successCount} RDO(s) em lote.`
       });
       setSelectedIds([]);
     } catch (err: any) {
       console.error("Erro ao remover assinaturas em lote:", err);
       setToastFeedback({
         type: "error",
-        msg: "Ocorreu um erro ao remover assinaturas: " + err.message
+        msg: "Ocorreu um erro ao remover assinaturas: " + (err.message || err)
       });
     } finally {
       setIsProcessing(false);
@@ -343,7 +328,7 @@ export const BatchSignModal: React.FC<BatchSignModalProps> = ({
     }
   };
 
-  const roleLabelMap = {
+  const roleLabelMap: Record<SignatureRole, string> = {
     emitente: "Emitente (Contratada SEEL)",
     gerenciadora: "Gerenciadora / Fiscal Externa",
     contratante: "Fiscal do Contratante"
@@ -642,10 +627,10 @@ export const BatchSignModal: React.FC<BatchSignModalProps> = ({
               Fechar
             </button>
 
-            {/* Opção 2: Botão de Assinar em Lote */}
+            {/* Botão de Assinar em Lote */}
             {filterMode === "nao_assinados" && (
               <button
-                onClick={handleOpenSignConfirm}
+                onClick={executeBatchSign}
                 disabled={isProcessing || selectedIds.length === 0}
                 className="flex-1 sm:flex-initial h-9 px-5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs uppercase tracking-wide rounded-xl transition-all shadow-md flex items-center justify-center gap-2 border-none cursor-pointer disabled:opacity-50"
               >
@@ -663,10 +648,10 @@ export const BatchSignModal: React.FC<BatchSignModalProps> = ({
               </button>
             )}
 
-            {/* Opção 2 - Alt: Botão de Remover Assinatura em Lote */}
+            {/* Botão de Remover Assinatura em Lote */}
             {filterMode === "assinados" && (
               <button
-                onClick={handleOpenUnsignConfirm}
+                onClick={executeBatchUnsign}
                 disabled={isProcessing || selectedIds.length === 0}
                 className="flex-1 sm:flex-initial h-9 px-5 bg-rose-600 hover:bg-rose-700 text-white font-black text-xs uppercase tracking-wide rounded-xl transition-all shadow-md flex items-center justify-center gap-2 border-none cursor-pointer disabled:opacity-50"
               >
@@ -685,67 +670,6 @@ export const BatchSignModal: React.FC<BatchSignModalProps> = ({
             )}
           </div>
         </div>
-
-        {/* CUSTOM CONFIRMATION MODAL OVERLAY */}
-        {confirmModal && (
-          <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4 z-[1010] animate-fade-in">
-            <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-md p-6 text-slate-800 space-y-4">
-              <div className="flex items-center gap-3">
-                <div className={`p-3 rounded-2xl ${confirmModal === "sign" ? "bg-amber-100 text-amber-700" : "bg-rose-100 text-rose-700"}`}>
-                  {confirmModal === "sign" ? <FileSignature className="w-6 h-6" /> : <Trash2 className="w-6 h-6" />}
-                </div>
-                <div>
-                  <h3 className="text-base font-extrabold text-slate-900 leading-snug">
-                    {confirmModal === "sign" ? "Confirmar Assinatura Digital" : "Confirmar Remoção de Assinatura"}
-                  </h3>
-                  <p className="text-xs text-slate-500 font-semibold">
-                    Ação em Lote ({selectedIds.length} RDOs)
-                  </p>
-                </div>
-              </div>
-
-              <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 text-xs space-y-2">
-                <div className="flex justify-between">
-                  <span className="text-slate-500 font-bold">Função / Papel:</span>
-                  <span className="font-extrabold text-slate-800">{roleLabelMap[selectedRole]}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500 font-bold">Signatário:</span>
-                  <span className="font-extrabold text-slate-900">{signerName}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500 font-bold">RDOs Selecionados:</span>
-                  <span className="font-black text-amber-600">{selectedIds.length} RDO(s)</span>
-                </div>
-              </div>
-
-              <p className="text-xs text-slate-600 leading-relaxed">
-                {confirmModal === "sign" 
-                  ? "Deseja assinar em lote todos os RDOs selecionados? Cada documento receberá um registro de assinatura e um código hash de verificação único."
-                  : "Tem certeza que deseja cancelar e remover as assinaturas registradas para os RDOs selecionados?"}
-              </p>
-
-              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
-                <button
-                  onClick={() => setConfirmModal(null)}
-                  className="px-4 h-9 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 border-none bg-transparent cursor-pointer"
-                >
-                  Cancelar
-                </button>
-                <button
-                  onClick={confirmModal === "sign" ? executeBatchSign : executeBatchUnsign}
-                  className={`px-5 h-9 rounded-xl text-xs font-black uppercase tracking-wide text-white transition-all border-none cursor-pointer shadow-md ${
-                    confirmModal === "sign" 
-                      ? "bg-amber-500 hover:bg-amber-400 text-slate-950" 
-                      : "bg-rose-600 hover:bg-rose-700"
-                  }`}
-                >
-                  {confirmModal === "sign" ? `Sim, Assinar (${selectedIds.length})` : `Sim, Remover (${selectedIds.length})`}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
 
       </div>
     </div>
