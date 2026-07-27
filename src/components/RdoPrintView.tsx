@@ -27,6 +27,28 @@ const formatPrintDate = (dateStr: string): string => {
   return `${formattedDate}, ${weekDay}`;
 };
 
+// Helper to parse quantity and item description e.g. "3x Carpinteiro" -> { qtd: 3, desc: "Carpinteiro" }
+const parseItemQty = (formatted: string): { desc: string; qtd: number } => {
+  if (!formatted) return { desc: "", qtd: 1 };
+  const match = formatted.match(/^(\d+)x?\s+(.*)$/i) || formatted.match(/^(\d+)\s*-\s*(.*)$/i);
+  if (match) {
+    return { qtd: Math.max(1, parseInt(match[1], 10) || 1), desc: match[2].trim() };
+  }
+  return { desc: formatted.trim(), qtd: 1 };
+};
+
+// Helper for humanized stoppage category labels
+const getCategoryLabel = (key: string): string => {
+  switch (key) {
+    case "chuva": return "Chuva / Intempéries";
+    case "raios": return "Incidência de Raios / Descargas Elétricas";
+    case "projetos": return "Projetos / Revisões Técnico-Operacionais";
+    case "vizinhos": return "Interferência de Vizinhos / Terceiros";
+    case "outros": return "Outros Motivos de Inoperância";
+    default: return key;
+  }
+};
+
 // Barcode svg simulator
 const BarcodeSvg: React.FC<{ code: string }> = ({ code }) => {
   // Generate pseudo-random line widths
@@ -575,85 +597,175 @@ const SingleReportPrint: React.FC<{ report: RdoReport }> = ({ report }) => {
 
             {/* PARALISAÇÕES - TIMETABLE GRID */}
             <div>
-              <h4 className="text-[9px] font-bold bg-[#004899] text-white py-0.5 px-2 uppercase tracking-wide">
-                TABELA DETALHADA DE PARALISAÇÕES DO EFETIVO
+              <h4 className="text-[9px] font-bold bg-[#004899] text-white py-0.5 px-2 uppercase tracking-wide flex justify-between items-center">
+                <span>TABELA DETALHADA DE PARALISAÇÕES DO EFETIVO</span>
+                <span className="text-[8px] font-normal font-mono">Total no dia: {report.paralisacoesSummary.totalHorasParalisadasDia}h</span>
               </h4>
-              <div className="border border-gray-300 overflow-x-auto">
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr className="bg-gray-50 border-b border-gray-300 text-[7px] text-gray-500">
-                      <th className="p-1 border-r border-gray-200 w-16">CATEGORIA</th>
-                      <th className="p-1 border-r border-gray-200">JANELA DE HORAS PARALISADAS E NOTAS EXPLICATIVAS</th>
-                      <th className="p-1 border-r border-gray-200 w-48">FRENTES, MÃO DE OBRA E EQUIPAMENTOS PARADOS</th>
-                      <th className="p-1 w-12 text-center">TOTAL</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-200">
-                    {Object.entries(report.paralisacoesDetalhe || {}).map(([key, rowVal]) => {
+
+              {(() => {
+                const activeParalisacoes = Object.entries(report.paralisacoesDetalhe || {}).filter(([, rowVal]) => {
+                  const row = rowVal as StoppageDetailRow;
+                  if (!row) return false;
+                  const hasHours = Boolean(row.horas && row.horas.length > 0);
+                  const hasComment = Boolean(row.comentarios && row.comentarios.trim());
+                  const hasFrentes = Boolean(
+                    (row.frentesItems && row.frentesItems.length > 0) ||
+                    (row.frentes && row.frentes.trim())
+                  );
+                  const hasTotal = Boolean(row.total && row.total !== "0h");
+                  return row.ativo || hasHours || hasComment || hasFrentes || hasTotal;
+                });
+
+                if (activeParalisacoes.length === 0) {
+                  return (
+                    <div className="border border-gray-300 p-2 text-center text-gray-500 italic text-[8px] bg-white">
+                      Sem paralisações ou inoperâncias de efetivo/equipamentos registradas neste RDO.
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="border border-gray-300 divide-y divide-gray-300">
+                    {activeParalisacoes.map(([catKey, rowVal]) => {
                       const row = rowVal as StoppageDetailRow;
+                      const catLabel = getCategoryLabel(catKey);
+
+                      const frentesList = (row.frentesItems && row.frentesItems.length > 0)
+                        ? row.frentesItems
+                        : row.frentes && row.frentes.trim()
+                          ? [{ id: 'f-init-' + catKey, nome: row.frentes }]
+                          : [];
+
                       return (
-                        <tr key={key} className={row.ativo ? "bg-white text-[8px]" : "bg-gray-50/50 text-[8px] opacity-70"}>
-                          <td className="p-1 border-r border-gray-300 font-bold capitalize text-blue-900 bg-gray-50/30">
-                            {key === "raios" ? "Raios" : key}
-                          </td>
-                          <td className="p-1 border-r border-gray-300">
-                            {/* Render hour tag bullets that are paralisadas */}
-                            <div className="flex flex-wrap gap-1">
-                              {row.ativo && row.horas.length > 0 ? (
-                                row.horas.map(h => (
-                                  <span key={h} className="bg-red-50 text-red-700 border border-red-200 rounded px-1 text-[7.5px] font-bold font-mono">
-                                    {h}
-                                  </span>
-                                ))
-                              ) : (
-                                <span className="text-gray-400 text-[7.5px] italic">Sem paralisação</span>
-                              )}
+                        <div key={catKey} className="p-2 space-y-2 bg-white">
+                          {/* PARTE SUPERIOR: Categoria, Janela de Horas e Nota Explicativa */}
+                          <div className="bg-slate-50 p-2 rounded border border-slate-200 space-y-1.5">
+                            <div className="flex items-center justify-between border-b border-slate-200 pb-1">
+                              <span className="font-bold text-[8.5px] uppercase text-[#004899] tracking-tight">
+                                Paralisação por: <span className="font-extrabold text-blue-900">{catLabel}</span>
+                              </span>
+                              <span className="font-mono font-bold text-[8.5px] text-red-700 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded">
+                                Duração Total: {row.total || "0h"}
+                              </span>
                             </div>
-                            {row.comentarios && (
-                              <p className="text-[7.5px] italic text-[#004899] mt-1 bg-slate-50 p-1 rounded border border-slate-200/60 leading-tight">
-                                <strong className="not-italic text-slate-700">Notas: </strong>{row.comentarios}
-                              </p>
+
+                            <div className="flex items-center gap-2 text-[8px]">
+                              <span className="font-bold text-gray-700 uppercase shrink-0">Janela de Horas Paralisadas:</span>
+                              <div className="flex flex-wrap gap-1">
+                                {row.horas && row.horas.length > 0 ? (
+                                  row.horas.map(h => (
+                                    <span key={h} className="bg-red-50 text-red-700 border border-red-200 font-mono font-bold px-1.5 py-0.2 rounded text-[7.5px]">
+                                      {h}
+                                    </span>
+                                  ))
+                                ) : (
+                                  <span className="text-gray-400 italic text-[7.5px]">Sem janela de horário informada</span>
+                                )}
+                              </div>
+                            </div>
+
+                            {row.comentarios && row.comentarios.trim() !== "" && (
+                              <div className="text-[7.5px] bg-blue-50/70 border border-blue-200/80 p-1.5 rounded text-blue-900 leading-tight">
+                                <span className="font-bold uppercase text-blue-950 mr-1">Nota Explicativa:</span>
+                                {row.comentarios}
+                              </div>
                             )}
-                          </td>
-                          <td className="p-1 border-r border-gray-300 text-gray-600 max-w-[180px] leading-tight">
-                            {row.ativo ? (
-                              row.frentesItems && row.frentesItems.length > 0 ? (
-                                <div className="space-y-1">
-                                  {row.frentesItems.map((f, fi) => (
-                                    <div key={f.id || fi} className="text-[7.5px] border-b border-gray-100 last:border-b-0 pb-0.5">
-                                      <span className="font-semibold text-gray-800">• {f.nome || "Frente sem nome"}</span>
-                                      {f.pqItemDesc && (
-                                        <span className="block text-[7px] text-[#004899] font-mono pl-1.5 truncate">
-                                          PQ: {f.pqItemDesc}
-                                        </span>
-                                      )}
-                                      {f.maoDeObraDescs && f.maoDeObraDescs.length > 0 && (
-                                        <span className="block text-[7px] text-amber-900 font-medium pl-1.5">
-                                          M.O. Parada: {f.maoDeObraDescs.join(", ")}
-                                        </span>
-                                      )}
-                                      {f.equipamentoDescs && f.equipamentoDescs.length > 0 && (
-                                        <span className="block text-[7px] text-sky-900 font-medium pl-1.5">
-                                          Equip. Parados: {f.equipamentoDescs.join(", ")}
-                                        </span>
-                                      )}
+                          </div>
+
+                          {/* PARTE INFERIOR: FRENTES, MÃO DE OBRA E EQUIPAMENTOS PARADOS */}
+                          <div>
+                            <span className="block text-[8px] font-bold text-gray-700 uppercase tracking-wide mb-1">
+                              Frentes de Trabalho, Mão de Obra e Equipamentos Parados:
+                            </span>
+
+                            {frentesList.length > 0 ? (
+                              <div className="space-y-1.5">
+                                {frentesList.map((f, fi) => {
+                                  const laborItems = (f.maoDeObraDescs || []).map(parseItemQty);
+                                  const equipItems = (f.equipamentoDescs || []).map(parseItemQty);
+
+                                  return (
+                                    <div key={f.id || fi} className="border border-gray-200 rounded text-[7.5px] bg-white overflow-hidden">
+                                      {/* Header da Frente */}
+                                      <div className="bg-gray-100 px-2 py-1 font-bold text-gray-800 border-b border-gray-200 flex flex-wrap justify-between items-center gap-1">
+                                        <span>• {f.nome || "Frente de trabalho"}</span>
+                                        {f.pqItemDesc && (
+                                          <span className="text-[7px] text-[#004899] font-mono font-normal">
+                                            Planilha PQ: {f.pqItemDesc}
+                                          </span>
+                                        )}
+                                      </div>
+
+                                      {/* Tabela de Insumos */}
+                                      <div className="p-1.5 space-y-1.5">
+                                        {/* Mão de Obra Parada */}
+                                        {laborItems.length > 0 ? (
+                                          <div>
+                                            <span className="block font-bold text-amber-900 text-[7px] uppercase mb-0.5">
+                                              Mão de Obra Parada:
+                                            </span>
+                                            <table className="w-full text-left border-collapse border border-amber-200/80">
+                                              <thead>
+                                                <tr className="bg-amber-50 text-amber-950 font-bold text-[7px] border-b border-amber-200/80">
+                                                  <th className="p-1 border-r border-amber-200/80">Cargo / Função</th>
+                                                  <th className="p-1 w-24 text-center">Quantidade Parada</th>
+                                                </tr>
+                                              </thead>
+                                              <tbody className="divide-y divide-amber-100 text-gray-800">
+                                                {laborItems.map((itm, lIdx) => (
+                                                  <tr key={lIdx} className="hover:bg-amber-50/30">
+                                                    <td className="p-1 border-r border-amber-200/60 font-medium">{itm.desc}</td>
+                                                    <td className="p-1 text-center font-bold font-mono text-amber-950">{itm.qtd} colabs</td>
+                                                  </tr>
+                                                ))}
+                                              </tbody>
+                                            </table>
+                                          </div>
+                                        ) : (
+                                          <span className="text-gray-400 italic text-[7px] block">Sem especificação de mão de obra parada para esta frente.</span>
+                                        )}
+
+                                        {/* Equipamentos Parados */}
+                                        {equipItems.length > 0 && (
+                                          <div>
+                                            <span className="block font-bold text-sky-900 text-[7px] uppercase mb-0.5">
+                                              Equipamentos Parados:
+                                            </span>
+                                            <table className="w-full text-left border-collapse border border-sky-200/80">
+                                              <thead>
+                                                <tr className="bg-sky-50 text-sky-950 font-bold text-[7px] border-b border-sky-200/80">
+                                                  <th className="p-1 border-r border-sky-200/80">Equipamento</th>
+                                                  <th className="p-1 w-24 text-center">Quantidade Parada</th>
+                                                </tr>
+                                              </thead>
+                                              <tbody className="divide-y divide-sky-100 text-gray-800">
+                                                {equipItems.map((itm, eIdx) => (
+                                                  <tr key={eIdx} className="hover:bg-sky-50/30">
+                                                    <td className="p-1 border-r border-sky-200/60 font-medium">{itm.desc}</td>
+                                                    <td className="p-1 text-center font-bold font-mono text-sky-950">{itm.qtd} un</td>
+                                                  </tr>
+                                                ))}
+                                              </tbody>
+                                            </table>
+                                          </div>
+                                        )}
+                                      </div>
                                     </div>
-                                  ))}
-                                </div>
-                              ) : (
-                                row.frentes || "Todas"
-                              )
-                            ) : "-"}
-                          </td>
-                          <td className="p-1 text-center font-bold text-red-600 font-mono">
-                            {row.ativo ? row.total || "0h" : "0h"}
-                          </td>
-                        </tr>
+                                  );
+                                })}
+                              </div>
+                            ) : (
+                              <div className="text-gray-400 italic text-[7.5px] p-1 bg-gray-50 rounded border border-gray-200">
+                                Todas as frentes de trabalho afetadas.
+                              </div>
+                            )}
+                          </div>
+                        </div>
                       );
                     })}
-                  </tbody>
-                </table>
-              </div>
+                  </div>
+                );
+              })()}
             </div>
 
             {/* ACCIDENTS EXTENDED NOTE */}

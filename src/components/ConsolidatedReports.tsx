@@ -40,12 +40,17 @@ import {
   ChevronDown,
   ChevronUp,
   Building2,
-  DollarSign
+  DollarSign,
+  Lock,
+  Edit3,
+  Save,
+  X,
+  Check
 } from "lucide-react";
 import * as XLSX from "xlsx";
 
 export const ConsolidatedReports: React.FC = () => {
-  const { reports, currentObra, user, isGlobalAdmin } = useRdoStore();
+  const { reports, currentObra, user, isGlobalAdmin, saveReport } = useRdoStore();
 
   const currentUserEmail = user && 'email' in user ? (user.email?.toLowerCase() || "") : "";
   const permission = currentObra?.permissoes?.find(p => p?.email?.toLowerCase() === currentUserEmail);
@@ -64,7 +69,7 @@ export const ConsolidatedReports: React.FC = () => {
     return new Date().toISOString().split("T")[0];
   });
 
-  const [activeSubTab, setActiveSubTab] = useState<"histogramas" | "pluviometria" | "praticabilidade" | "recursosOciosos">("histogramas");
+  const [activeSubTab, setActiveSubTab] = useState<"histogramas" | "pluviometria" | "praticabilidade" | "recursosOciosos" | "comentariosEspeciais">("histogramas");
 
   // Guard: Restrict Recursos Ociosos tab to users with Edit access only
   React.useEffect(() => {
@@ -80,6 +85,15 @@ export const ConsolidatedReports: React.FC = () => {
   const [idleChartViewMode, setIdleChartViewMode] = useState<"diario" | "mensal">("diario");
   const [expandedObsMap, setExpandedObsMap] = useState<Record<string, boolean>>({});
 
+  // Special Comments States & Logic
+  const [commentSearchQuery, setCommentSearchQuery] = useState<string>("");
+  const [commentStatusFilter, setCommentStatusFilter] = useState<"todos" | "editaveis" | "assinados">("todos");
+  const [commentOnlyFilter, setCommentOnlyFilter] = useState<boolean>(true);
+  const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
+  const [editingCommentText, setEditingCommentText] = useState<string>("");
+  const [isSavingComment, setIsSavingComment] = useState<boolean>(false);
+  const [commentSaveSuccess, setCommentSaveSuccess] = useState<string | null>(null);
+
   // Filter reports of active obra in the selected range
   const filteredReports = useMemo(() => {
     if (!currentObra) return [];
@@ -93,6 +107,180 @@ export const ConsolidatedReports: React.FC = () => {
       })
       .sort((a, b) => a.data.localeCompare(b.data));
   }, [reports, currentObra, startDate, endDate]);
+
+  // Special Comments Data Model
+  interface SpecialCommentItem {
+    id: string;
+    reportId: string;
+    numeroRdo: number | string;
+    data: string;
+    obraNome: string;
+    activityId: string;
+    activityCode: string;
+    activityDesc: string;
+    activityTotal: string;
+    activityUnit: string;
+    comentario: string;
+    isSigned: boolean;
+    signedCount: number;
+    reportRef: any;
+    actIdx: number;
+  }
+
+  const specialCommentsData = useMemo(() => {
+    const items: SpecialCommentItem[] = [];
+    
+    (filteredReports || []).forEach(report => {
+      const isSigned = Boolean(
+        report.emitenteAssinado ||
+        report.gerenciadoraAssinado ||
+        report.contratanteAssinado ||
+        report.status === "Assinado"
+      );
+
+      const signedCount = (report.emitenteAssinado ? 1 : 0) +
+        (report.gerenciadoraAssinado ? 1 : 0) +
+        (report.contratanteAssinado ? 1 : 0);
+
+      (report.atividades || []).forEach((act, actIdx) => {
+        items.push({
+          id: `${report.id}_${act.id || actIdx}`,
+          reportId: report.id,
+          numeroRdo: report.rdoNo || report.id || "-",
+          data: report.data,
+          obraNome: report.obra || currentObra?.nome || "",
+          activityId: act.id || `act-${actIdx}`,
+          activityCode: act.identificador || "-",
+          activityDesc: act.descricao || "Atividade sem descrição",
+          activityTotal: act.total || "0",
+          activityUnit: act.intervalo || "Un",
+          comentario: act.comentario || "",
+          isSigned,
+          signedCount,
+          reportRef: report,
+          actIdx
+        });
+      });
+    });
+
+    return items;
+  }, [filteredReports, currentObra]);
+
+  const filteredSpecialComments = useMemo(() => {
+    return specialCommentsData.filter(item => {
+      if (commentOnlyFilter && (!item.comentario || item.comentario.trim() === "")) {
+        return false;
+      }
+      if (commentStatusFilter === "editaveis" && item.isSigned) return false;
+      if (commentStatusFilter === "assinados" && !item.isSigned) return false;
+
+      if (commentSearchQuery.trim() !== "") {
+        const q = commentSearchQuery.toLowerCase();
+        const matchComment = (item.comentario || "").toLowerCase().includes(q);
+        const matchDesc = (item.activityDesc || "").toLowerCase().includes(q);
+        const matchCode = (item.activityCode || "").toLowerCase().includes(q);
+        const matchRdo = String(item.numeroRdo).toLowerCase().includes(q);
+        const matchDate = (item.data || "").includes(q);
+        if (!matchComment && !matchDesc && !matchCode && !matchRdo && !matchDate) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [specialCommentsData, commentOnlyFilter, commentStatusFilter, commentSearchQuery]);
+
+  const commentStats = useMemo(() => {
+    const withComments = specialCommentsData.filter(i => i.comentario && i.comentario.trim() !== "");
+    const distinctReportsWithComments = new Set(withComments.map(i => i.reportId)).size;
+    const editableComments = withComments.filter(i => !i.isSigned).length;
+    const lockedComments = withComments.filter(i => i.isSigned).length;
+
+    return {
+      totalComments: withComments.length,
+      distinctReports: distinctReportsWithComments,
+      editableComments,
+      lockedComments
+    };
+  }, [specialCommentsData]);
+
+  const handleSaveSpecialComment = async (item: SpecialCommentItem) => {
+    if (item.isSigned) {
+      alert("Este RDO possui assinatura e não pode ser editado.");
+      return;
+    }
+
+    try {
+      setIsSavingComment(true);
+      const targetReport = reports.find(r => r.id === item.reportId) || item.reportRef;
+      
+      const updatedAtividades = (targetReport.atividades || []).map((act: any, idx: number) => {
+        if (idx === item.actIdx || (act.id && act.id === item.activityId)) {
+          return {
+            ...act,
+            comentario: editingCommentText
+          };
+        }
+        return act;
+      });
+
+      const updatedReport = {
+        ...targetReport,
+        atividades: updatedAtividades,
+        updatedAt: new Date().toISOString()
+      };
+
+      if (saveReport) {
+        await saveReport(updatedReport);
+      }
+
+      setEditingCommentId(null);
+      setCommentSaveSuccess(`Comentário do RDO #${item.numeroRdo} atualizado com sucesso!`);
+      setTimeout(() => setCommentSaveSuccess(null), 3500);
+    } catch (err: any) {
+      alert("Erro ao salvar comentário: " + (err.message || err));
+    } finally {
+      setIsSavingComment(false);
+    }
+  };
+
+  const handleExportCommentsToExcel = () => {
+    if (filteredSpecialComments.length === 0) {
+      alert("Nenhum comentário encontrado com os filtros atuais para exportar.");
+      return;
+    }
+
+    const excelRows = filteredSpecialComments.map(item => ({
+      "Data do RDO": item.data ? item.data.split("-").reverse().join("/") : "",
+      "Nº RDO": `#${item.numeroRdo}`,
+      "Obra": item.obraNome,
+      "Código Atividade": item.activityCode,
+      "Descrição da Atividade": item.activityDesc,
+      "Metragem / Qtd Dia": `${item.activityTotal} ${item.activityUnit}`,
+      "Comentário Especial do Dia": item.comentario || "Sem comentário",
+      "Status do RDO": item.isSigned ? `Assinado (${item.signedCount}/3)` : "Em Aberto (Sem assinatura)",
+      "Pode ser Alterado?": item.isSigned ? "Não (RDO Assinado)" : "Sim (Editável)"
+    }));
+
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(excelRows);
+
+    ws["!cols"] = [
+      { wch: 12 },
+      { wch: 10 },
+      { wch: 22 },
+      { wch: 18 },
+      { wch: 42 },
+      { wch: 16 },
+      { wch: 55 },
+      { wch: 22 },
+      { wch: 20 }
+    ];
+
+    XLSX.utils.book_append_sheet(wb, ws, "Comentários Especiais");
+    const fileName = `Comentarios_Especiais_${(currentObra?.nome || "Obra").replace(/\s+/g, "_")}_${startDate}_a_${endDate}.xlsx`;
+    XLSX.writeFile(wb, fileName);
+  };
 
   // 1. DATA PREPARATION: HISTOGRAMS (Personnel & Equipment)
   const histogramData = useMemo(() => {
@@ -1684,6 +1872,17 @@ export const ConsolidatedReports: React.FC = () => {
                 Recursos Ociosos
               </button>
             )}
+            <button
+              onClick={() => setActiveSubTab("comentariosEspeciais")}
+              className={`pb-2.5 px-4 font-bold text-xs uppercase tracking-wider border-b-2 transition-all cursor-pointer border-none bg-transparent flex items-center gap-1.5 ${
+                activeSubTab === "comentariosEspeciais"
+                  ? "border-amber-500 text-amber-700"
+                  : "border-transparent text-slate-500 hover:text-slate-800"
+              }`}
+            >
+              <MessageSquare className="w-3.5 h-3.5 text-amber-600" />
+              Comentários Especiais
+            </button>
           </div>
 
           {/* TAB 1: HISTOGRAMAS DE MÃO DE OBRA E EQUIPAMENTOS */}
@@ -2907,6 +3106,283 @@ export const ConsolidatedReports: React.FC = () => {
                         </div>
                       );
                     })}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* TAB 5: COMENTÁRIOS ESPECIAIS DO DIA DAS ATIVIDADES */}
+          {activeSubTab === "comentariosEspeciais" && (
+            <div className="space-y-6">
+              {/* Header Title */}
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs">
+                <div>
+                  <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
+                    <MessageSquare className="w-5 h-5 text-amber-600" />
+                    Comentários Especiais do Dia por Atividade
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Consolidado de todas as observações registradas nas atividades. Comentários de RDOs sem assinatura podem ser editados diretamente nesta tela.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleExportCommentsToExcel}
+                  className="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-2 shadow-xs cursor-pointer self-start md:self-auto shrink-0"
+                >
+                  <FileSpreadsheet className="w-4 h-4" />
+                  Exportar para Excel
+                </button>
+              </div>
+
+              {/* KPI Cards */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs space-y-1">
+                  <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">Total de Comentários</span>
+                  <div className="flex items-center justify-between">
+                    <span className="text-2xl font-extrabold text-slate-800">{commentStats.totalComments}</span>
+                    <MessageSquare className="w-5 h-5 text-amber-500/80" />
+                  </div>
+                  <span className="text-[10px] text-slate-400 block">Comentários inseridos no período</span>
+                </div>
+
+                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs space-y-1">
+                  <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">RDOs Envolvidos</span>
+                  <div className="flex items-center justify-between">
+                    <span className="text-2xl font-extrabold text-slate-800">{commentStats.distinctReports}</span>
+                    <FileText className="w-5 h-5 text-blue-500/80" />
+                  </div>
+                  <span className="text-[10px] text-slate-400 block">Diários com comentários</span>
+                </div>
+
+                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs space-y-1">
+                  <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">Editáveis (Sem Assinatura)</span>
+                  <div className="flex items-center justify-between">
+                    <span className="text-2xl font-extrabold text-emerald-700">{commentStats.editableComments}</span>
+                    <Edit3 className="w-5 h-5 text-emerald-500/80" />
+                  </div>
+                  <span className="text-[10px] text-emerald-600 font-medium block">Liberados para alteração</span>
+                </div>
+
+                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs space-y-1">
+                  <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">Bloqueados (Assinados)</span>
+                  <div className="flex items-center justify-between">
+                    <span className="text-2xl font-extrabold text-amber-800">{commentStats.lockedComments}</span>
+                    <Lock className="w-5 h-5 text-amber-600/80" />
+                  </div>
+                  <span className="text-[10px] text-amber-700 font-medium block">Protegidos por assinatura</span>
+                </div>
+              </div>
+
+              {/* Toast Message */}
+              {commentSaveSuccess && (
+                <div className="bg-emerald-50 border border-emerald-300 text-emerald-900 px-4 py-3 rounded-xl text-xs font-bold flex items-center justify-between animate-fade-in shadow-2xs">
+                  <span className="flex items-center gap-2">
+                    <Check className="w-4 h-4 text-emerald-600" />
+                    {commentSaveSuccess}
+                  </span>
+                  <button type="button" onClick={() => setCommentSaveSuccess(null)} className="text-emerald-700 hover:text-emerald-900 cursor-pointer">
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
+
+              {/* Filters & Control Bar */}
+              <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs space-y-3">
+                <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+                  {/* Search Bar */}
+                  <div className="relative flex-1">
+                    <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input
+                      type="text"
+                      value={commentSearchQuery}
+                      onChange={(e) => setCommentSearchQuery(e.target.value)}
+                      placeholder="Buscar por comentário, atividade, código ou nº de RDO..."
+                      className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
+                    />
+                  </div>
+
+                  {/* Status Select Filter */}
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs font-bold text-slate-600 shrink-0">Status RDO:</label>
+                    <select
+                      value={commentStatusFilter}
+                      onChange={(e) => setCommentStatusFilter(e.target.value as any)}
+                      className="py-2 px-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 cursor-pointer"
+                    >
+                      <option value="todos">Todos os RDOs</option>
+                      <option value="editaveis">Somente Editáveis (Sem Assinatura)</option>
+                      <option value="assinados">Somente Assinados (Bloqueados)</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Filter Checkbox */}
+                <div className="flex items-center gap-2 pt-1 border-t border-slate-100">
+                  <input
+                    type="checkbox"
+                    id="chk-only-comments"
+                    checked={commentOnlyFilter}
+                    onChange={(e) => setCommentOnlyFilter(e.target.checked)}
+                    className="w-4 h-4 rounded border-slate-300 text-amber-600 focus:ring-amber-500 cursor-pointer"
+                  />
+                  <label htmlFor="chk-only-comments" className="text-xs font-medium text-slate-700 cursor-pointer select-none">
+                    Exibir apenas atividades com comentário preenchido ({specialCommentsData.filter(i => i.comentario && i.comentario.trim() !== "").length} itens)
+                  </label>
+                </div>
+              </div>
+
+              {/* Comments Table / List */}
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+                {filteredSpecialComments.length === 0 ? (
+                  <div className="p-12 text-center space-y-3">
+                    <MessageSquare className="w-10 h-10 text-slate-300 mx-auto" />
+                    <p className="text-sm font-semibold text-slate-600">Nenhum comentário especial encontrado.</p>
+                    <p className="text-xs text-slate-400">Tente ajustar o filtro de busca, o intervalo de datas ou o filtro de preenchimento.</p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                          <th className="p-3.5 w-32">Data / RDO</th>
+                          <th className="p-3.5 w-36">Status RDO</th>
+                          <th className="p-3.5 min-w-[220px]">Atividade & Especificação</th>
+                          <th className="p-3.5 min-w-[320px]">Comentário Especial do Dia</th>
+                          <th className="p-3.5 w-28 text-center">Ação</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 text-xs">
+                        {filteredSpecialComments.map((item) => {
+                          const isEditing = editingCommentId === item.id;
+
+                          return (
+                            <tr key={item.id} className="hover:bg-slate-50/60 transition-colors">
+                              {/* Data / RDO */}
+                              <td className="p-3.5 align-top">
+                                <div className="space-y-0.5">
+                                  <span className="font-extrabold text-slate-800 text-xs block">
+                                    RDO #{item.numeroRdo}
+                                  </span>
+                                  <span className="text-[11px] font-mono text-slate-500 block">
+                                    {item.data ? item.data.split("-").reverse().join("/") : "-"}
+                                  </span>
+                                </div>
+                              </td>
+
+                              {/* Status RDO */}
+                              <td className="p-3.5 align-top">
+                                {item.isSigned ? (
+                                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10.5px] font-bold bg-amber-50 text-amber-900 border border-amber-200">
+                                    <Lock className="w-3 h-3 text-amber-700" />
+                                    Assinado ({item.signedCount}/3)
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10.5px] font-bold bg-emerald-50 text-emerald-900 border border-emerald-200">
+                                    <Edit3 className="w-3 h-3 text-emerald-600" />
+                                    Em Aberto (Editável)
+                                  </span>
+                                )}
+                              </td>
+
+                              {/* Atividade */}
+                              <td className="p-3.5 align-top space-y-1">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className="px-1.5 py-0.5 bg-slate-100 text-slate-700 font-mono text-[10px] font-bold rounded border border-slate-200">
+                                    {item.activityCode}
+                                  </span>
+                                  <span className="font-semibold text-slate-800">
+                                    {item.activityDesc}
+                                  </span>
+                                </div>
+                                <div className="text-[11px] text-slate-500">
+                                  Avanço no dia: <strong className="text-slate-700 font-mono">{item.activityTotal} {item.activityUnit}</strong>
+                                </div>
+                              </td>
+
+                              {/* Comentário Especial */}
+                              <td className="p-3.5 align-top">
+                                {isEditing ? (
+                                  <div className="space-y-2">
+                                    <textarea
+                                      rows={3}
+                                      value={editingCommentText}
+                                      onChange={(e) => setEditingCommentText(e.target.value)}
+                                      placeholder="Digite o comentário especial para esta atividade..."
+                                      className="w-full p-2.5 bg-white border border-amber-400 rounded-xl text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500/30"
+                                      autoFocus
+                                    />
+                                    <div className="flex items-center gap-2">
+                                      <button
+                                        type="button"
+                                        onClick={() => handleSaveSpecialComment(item)}
+                                        disabled={isSavingComment}
+                                        className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1 shadow-xs cursor-pointer disabled:opacity-50"
+                                      >
+                                        <Save className="w-3.5 h-3.5" />
+                                        {isSavingComment ? "Salvando..." : "Salvar"}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setEditingCommentId(null)}
+                                        disabled={isSavingComment}
+                                        className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
+                                      >
+                                        <X className="w-3.5 h-3.5" />
+                                        Cancelar
+                                      </button>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div>
+                                    {item.comentario && item.comentario.trim() !== "" ? (
+                                      <div className="p-2.5 bg-slate-50 border border-slate-200/80 rounded-xl text-slate-800 text-xs leading-relaxed whitespace-pre-wrap">
+                                        {item.comentario}
+                                      </div>
+                                    ) : (
+                                      <span className="text-slate-400 italic text-xs block py-1">
+                                        Nenhum comentário cadastrado
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
+                              </td>
+
+                              {/* Ações */}
+                              <td className="p-3.5 align-top text-center">
+                                {!isEditing && (
+                                  item.isSigned ? (
+                                    <button
+                                      type="button"
+                                      disabled
+                                      title="Este RDO já possui assinaturas e não pode ser editado."
+                                      className="px-3 py-1.5 bg-slate-100 text-slate-400 border border-slate-200 rounded-xl text-xs font-semibold flex items-center gap-1 mx-auto cursor-not-allowed opacity-75"
+                                    >
+                                      <Lock className="w-3.5 h-3.5" />
+                                      Bloqueado
+                                    </button>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setEditingCommentId(item.id);
+                                        setEditingCommentText(item.comentario || "");
+                                      }}
+                                      className="px-3 py-1.5 bg-white hover:bg-amber-50 text-amber-800 border border-amber-300/80 hover:border-amber-400 rounded-xl text-xs font-bold transition-all flex items-center gap-1 mx-auto cursor-pointer shadow-2xs"
+                                    >
+                                      <Edit3 className="w-3.5 h-3.5 text-amber-600" />
+                                      Editar
+                                    </button>
+                                  )
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
                   </div>
                 )}
               </div>
