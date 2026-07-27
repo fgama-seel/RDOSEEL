@@ -73,9 +73,9 @@ export const ConsolidatedReports: React.FC = () => {
 
   const [activeSubTab, setActiveSubTab] = useState<"histogramas" | "pluviometria" | "praticabilidade" | "recursosOciosos" | "comentariosEspeciais">("histogramas");
 
-  // Guard: Restrict Recursos Ociosos tab to users with Edit access only
+  // Guard: Restrict Recursos Ociosos and Comentários Especiais tabs to users with Edit access only
   React.useEffect(() => {
-    if (!canEditAccess && activeSubTab === "recursosOciosos") {
+    if (!canEditAccess && (activeSubTab === "recursosOciosos" || activeSubTab === "comentariosEspeciais")) {
       setActiveSubTab("histogramas");
     }
   }, [canEditAccess, activeSubTab]);
@@ -1966,17 +1966,19 @@ export const ConsolidatedReports: React.FC = () => {
                 Recursos Ociosos
               </button>
             )}
-            <button
-              onClick={() => setActiveSubTab("comentariosEspeciais")}
-              className={`pb-2.5 px-4 font-bold text-xs uppercase tracking-wider border-b-2 transition-all cursor-pointer border-none bg-transparent flex items-center gap-1.5 ${
-                activeSubTab === "comentariosEspeciais"
-                  ? "border-amber-500 text-amber-700"
-                  : "border-transparent text-slate-500 hover:text-slate-800"
-              }`}
-            >
-              <MessageSquare className="w-3.5 h-3.5 text-amber-600" />
-              Comentários Especiais
-            </button>
+            {canEditAccess && (
+              <button
+                onClick={() => setActiveSubTab("comentariosEspeciais")}
+                className={`pb-2.5 px-4 font-bold text-xs uppercase tracking-wider border-b-2 transition-all cursor-pointer border-none bg-transparent flex items-center gap-1.5 ${
+                  activeSubTab === "comentariosEspeciais"
+                    ? "border-amber-500 text-amber-700"
+                    : "border-transparent text-slate-500 hover:text-slate-800"
+                }`}
+              >
+                <MessageSquare className="w-3.5 h-3.5 text-amber-600" />
+                Comentários Especiais
+              </button>
+            )}
           </div>
 
           {/* TAB 1: HISTOGRAMAS DE MÃO DE OBRA E EQUIPAMENTOS */}
@@ -3209,7 +3211,7 @@ export const ConsolidatedReports: React.FC = () => {
           )}
 
           {/* TAB 5: COMENTÁRIOS ESPECIAIS DO DIA (ATIVIDADES / PARALISAÇÕES) */}
-          {activeSubTab === "comentariosEspeciais" && (
+          {activeSubTab === "comentariosEspeciais" && canEditAccess && (
             <div className="space-y-6">
               {/* Header Title & Mode Controls */}
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs">
