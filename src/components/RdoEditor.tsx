@@ -166,8 +166,16 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
   const otherReportsForCloning = React.useMemo(() => {
     if (!currentReport) return [];
     return (reports || [])
-      .filter(r => r.id !== currentReport.id && (currentReport.obraId ? r.obraId === currentReport.obraId : r.obra === currentReport.obra))
-      .sort((a, b) => b.data.localeCompare(a.data));
+      .filter(r => {
+        const isDifferent = (r.id && currentReport.id)
+          ? r.id !== currentReport.id
+          : r.data !== currentReport.data;
+        const sameObra = (r.obraId && currentReport.obraId)
+          ? r.obraId === currentReport.obraId
+          : (r.obra && currentReport.obra && r.obra.trim().toLowerCase() === currentReport.obra.trim().toLowerCase());
+        return isDifferent && sameObra;
+      })
+      .sort((a, b) => (b.data || "").localeCompare(a.data || ""));
   }, [reports, currentReport]);
 
   // Drag and drop / local state representation
@@ -582,10 +590,20 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
       ...group,
       id: "labor-group-" + Math.random().toString(36).substring(2, 9) + Date.now(),
       items: sortLaborGroupItems(
-        (group.items || []).map((itm: any) => ({
-          ...itm,
-          id: "labor-itm-" + Math.random().toString(36).substring(2, 9) + Date.now()
-        }))
+        (group.items || []).map((itm: any) => {
+          const c = Number(itm.c || 0);
+          const f = Number(itm.f || 0);
+          const a = Number(itm.a || 0);
+          const t = Math.max(0, c - f);
+          return {
+            ...itm,
+            id: "labor-itm-" + Math.random().toString(36).substring(2, 9) + Date.now(),
+            c,
+            f,
+            a,
+            t
+          };
+        })
       )
     }));
 
@@ -593,8 +611,9 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
     let computedMod = 0;
     secureClonedLabor.forEach((g: any) => {
       (g.items || []).forEach((itm: any) => {
-        if (itm.moiMod === "MOI") computedMoi += Number(itm.c || 0) - Number(itm.f || 0);
-        if (itm.moiMod === "MOD") computedMod += Number(itm.c || 0) - Number(itm.f || 0);
+        const present = Math.max(0, Number(itm.c || 0) - Number(itm.f || 0));
+        if (itm.moiMod === "MOI") computedMoi += present;
+        else computedMod += present;
       });
     });
 
@@ -604,7 +623,7 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
         ...currentReport.efetivoSummary,
         moi: computedMoi,
         mod: computedMod,
-        total: computedMoi + computedMod + Number(currentReport.efetivoSummary.subcontratadosMoiMod || 0)
+        total: computedMoi + computedMod + Number(currentReport.efetivoSummary?.subcontratadosMoiMod || 0)
       }
     });
     setCloneType(null);
@@ -1927,6 +1946,7 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
                   </select>
                   
                   <button
+                    type="button"
                     onClick={() => {
                       const typed = prompt("Digite o nome da nova subcontratada:");
                       if (typed && typed.trim()) {
@@ -1939,6 +1959,7 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
                   </button>
 
                   <button
+                    type="button"
                     onClick={() => setCloneType("efetivo")}
                     className="h-8.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-[10px] font-bold uppercase tracking-wider transition-colors cursor-pointer shrink-0 flex items-center gap-1 border-none"
                     title="Clonar equipe de outro dia para o RDO que está editando"
@@ -2142,6 +2163,7 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
               </div>
               
               <button
+                type="button"
                 onClick={() => setCloneType("equipamentos")}
                 className="h-8.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-[10px] font-bold uppercase tracking-wider transition-colors cursor-pointer shrink-0 flex items-center gap-1 border-none"
                 title="Clonar equipamentos de outro dia para o RDO que está editando"
@@ -3092,6 +3114,7 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
                   </div>
                 </div>
                 <button 
+                  type="button"
                   onClick={() => setCloneType(null)}
                   className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-700 cursor-pointer border-none duration-150 transition-colors"
                 >
@@ -3143,6 +3166,7 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
 
               <div className="flex justify-end pt-3 border-t border-gray-100">
                 <button
+                  type="button"
                   onClick={() => setCloneType(null)}
                   className="px-4 py-2 border border-slate-200 text-slate-600 rounded-xl font-bold text-xs uppercase tracking-wider hover:bg-slate-50 cursor-pointer duration-150 transition-colors"
                 >
