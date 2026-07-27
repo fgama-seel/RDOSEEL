@@ -39,7 +39,7 @@ export interface Activity {
   intervalo: string;
   total: string;
   comentario?: string;
-  imagens?: string[]; // base64 encoded jpeg/png or urls (up to 2)
+  imagens?: string[]; // base64 encoded jpeg/png or urls
 }
 
 export const HOURS_LIST = [

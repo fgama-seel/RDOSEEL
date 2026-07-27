@@ -497,9 +497,9 @@ const SingleReportPrint: React.FC<{ report: RdoReport }> = ({ report }) => {
 
                     {/* Rendering images if applicable */}
                     {act.imagens && act.imagens.length > 0 && (
-                      <div className="flex gap-2.5 mt-2.5 ml-2">
-                        {act.imagens.slice(0, 2).map((imgUrl, imgIdx) => (
-                          <div key={imgIdx} className="w-1/2 max-w-[240px] aspect-[4/3] rounded border border-gray-200 overflow-hidden bg-gray-50 flex items-center justify-center">
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 mt-2.5 ml-2">
+                        {act.imagens.map((imgUrl, imgIdx) => (
+                          <div key={imgIdx} className="w-full max-w-[240px] aspect-[4/3] rounded border border-gray-200 overflow-hidden bg-gray-50 flex items-center justify-center">
                             <img
                               src={imgUrl}
                               alt={`Imagem anexa ${imgIdx + 1}`}

@@ -461,19 +461,21 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
   };
 
   // Detailed Labor Operations
-  const handleUpdateLaborItem = (groupIndex: number, itemIndex: number, fields: Partial<any>) => {
+  const handleUpdateLaborItem = (groupIndex: number, itemId: string, fields: Partial<LaborDetailItem>) => {
     const updatedGrid = [...currentReport.efetivoDetalhado];
     const group = { ...updatedGrid[groupIndex] };
-    const items = [...group.items];
-    
-    // Handle recalculation of T: total = Registered (C) minus Fails (F)
-    const currentItem = { ...items[itemIndex], ...fields };
-    if ("c" in fields || "f" in fields) {
-      currentItem.t = Math.max(0, (currentItem.c || 0) - (currentItem.f || 0));
-    }
+    const items = (group.items || []).map((itm) => {
+      if (itm.id === itemId) {
+        const currentItem = { ...itm, ...fields };
+        if ("c" in fields || "f" in fields) {
+          currentItem.t = Math.max(0, (currentItem.c || 0) - (currentItem.f || 0));
+        }
+        return currentItem;
+      }
+      return itm;
+    });
 
-    items[itemIndex] = currentItem;
-    group.items = sortLaborGroupItems(items);
+    group.items = items;
     updatedGrid[groupIndex] = group;
     // update report state
     updateReport({ efetivoDetalhado: updatedGrid });
@@ -482,24 +484,24 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
   const handleAddLaborRow = (groupIndex: number) => {
     const updatedGrid = [...currentReport.efetivoDetalhado];
     const group = { ...updatedGrid[groupIndex] };
-    const newItem = {
-      id: "labor-itm-" + Date.now(),
-      cargo: "Auxiliar Técnico",
-      c: 0,
+    const newItem: LaborDetailItem = {
+      id: "labor-itm-" + Date.now() + "-" + Math.random().toString(36).substring(2, 6),
+      cargo: "",
+      c: 1,
       f: 0,
       a: 0,
-      t: 0,
-      moiMod: "MOD" as const
+      t: 1,
+      moiMod: "MOD"
     };
-    group.items = sortLaborGroupItems([...group.items, newItem]);
+    group.items = [...(group.items || []), newItem];
     updatedGrid[groupIndex] = group;
     updateReport({ efetivoDetalhado: updatedGrid });
   };
 
-  const handleDeleteLaborRow = (groupIndex: number, itemIndex: number) => {
+  const handleDeleteLaborRow = (groupIndex: number, itemId: string) => {
     const updatedGrid = [...currentReport.efetivoDetalhado];
     const group = { ...updatedGrid[groupIndex] };
-    group.items = sortLaborGroupItems(group.items.filter((_, i) => i !== itemIndex));
+    group.items = (group.items || []).filter((itm) => itm.id !== itemId);
     updatedGrid[groupIndex] = group;
     updateReport({ efetivoDetalhado: updatedGrid });
   };
@@ -633,27 +635,28 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
   };
 
   // Image Upload helper using FileReader base64
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, actIdx: number) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>, actIdx: number) => {
     const files = e.target.files;
     if (files && files.length > 0) {
-      const file = files[0];
-      const reader = new FileReader();
-      reader.onloadend = async () => {
-        const base64String = reader.result as string;
+      const fileList = Array.from(files);
+      const newImages: string[] = [];
+      for (const file of fileList) {
+        if (!file.type.startsWith("image/")) continue;
+        const base64String = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.readAsDataURL(file);
+        });
         const compressedBase64 = await compressImage(base64String, 1024, 1024, 0.7);
+        newImages.push(compressedBase64);
+      }
+      if (newImages.length > 0) {
         const currentImgs = currentReport.atividades[actIdx].imagens || [];
-        if (currentImgs.length < 2) {
-          handleUpdateActivity(actIdx, {
-            imagens: [...currentImgs, compressedBase64]
-          });
-        } else {
-          // Overwrite first one
-          handleUpdateActivity(actIdx, {
-            imagens: [compressedBase64, currentImgs[1]]
-          });
-        }
-      };
-      reader.readAsDataURL(file);
+        handleUpdateActivity(actIdx, {
+          imagens: [...currentImgs, ...newImages]
+        });
+      }
+      e.target.value = "";
     }
   };
 
@@ -663,23 +666,30 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
     setDragActive(prev => ({ ...prev, [actId]: active }));
   };
 
-  const handleDrop = (e: React.DragEvent, actIdx: number) => {
+  const handleDrop = async (e: React.DragEvent, actIdx: number) => {
     e.preventDefault();
     e.stopPropagation();
     const actId = currentReport.atividades[actIdx].id;
     setDragActive(prev => ({ ...prev, [actId]: false }));
 
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      const reader = new FileReader();
-      reader.onloadend = async () => {
-        const base64String = reader.result as string;
-        const compressedBase64 = await compressImage(base64String, 1024, 1024, 0.7);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith("image/"));
+      if (files.length > 0) {
+        const newImages: string[] = [];
+        for (const file of files) {
+          const base64String = await new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result as string);
+            reader.readAsDataURL(file);
+          });
+          const compressedBase64 = await compressImage(base64String, 1024, 1024, 0.7);
+          newImages.push(compressedBase64);
+        }
         const currentImgs = currentReport.atividades[actIdx].imagens || [];
         handleUpdateActivity(actIdx, {
-          imagens: [...currentImgs.slice(-1), compressedBase64] // maintain max 2 images
+          imagens: [...currentImgs, ...newImages]
         });
-      };
-      reader.readAsDataURL(e.dataTransfer.files[0]);
+      }
     }
   };
 
@@ -1319,15 +1329,28 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
 
                     {/* PHOTO ATTACHMENT DRAG AND DROP / SELECTION */}
                     <div className="space-y-1.5 pt-1">
-                      <span className="block text-[10px] font-bold text-slate-500 uppercase tracking-tight">Fotos Anexas (Máximo 2 Imagens)</span>
+                      <div className="flex items-center justify-between">
+                        <span className="block text-[10px] font-bold text-slate-500 uppercase tracking-tight">
+                          Fotos Anexas ({act.imagens?.length || 0} {act.imagens?.length === 1 ? "foto" : "fotos"})
+                        </span>
+                        {act.imagens && act.imagens.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => handleUpdateActivity(idx, { imagens: [] })}
+                            className="text-[10px] text-red-600 hover:text-red-800 font-medium cursor-pointer"
+                          >
+                            Limpar fotos
+                          </button>
+                        )}
+                      </div>
                       
-                      <div className="flex flex-wrap gap-3 items-stretch">
+                      <div className="space-y-2">
                         {/* Drag and drop active area */}
                         <div
                           onDragOver={(e) => handleDrag(e, act.id, true)}
                           onDragLeave={(e) => handleDrag(e, act.id, false)}
                           onDrop={(e) => handleDrop(e, idx)}
-                          className={`flex-1 border border-dashed rounded p-3 flex flex-col justify-center items-center text-center transition-colors cursor-pointer ${
+                          className={`border border-dashed rounded p-3 flex flex-col justify-center items-center text-center transition-colors cursor-pointer ${
                             dragActive[act.id]
                               ? "border-amber-500 bg-amber-500/5 select-none"
                               : "border-slate-300 bg-slate-50 hover:bg-slate-100/50"
@@ -1338,66 +1361,44 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
                             id={`file-${act.id}`}
                             className="hidden"
                             accept="image/*"
+                            multiple
                             onChange={(e) => handleFileChange(e, idx)}
                           />
                           <label htmlFor={`file-${act.id}`} className="cursor-pointer flex flex-col items-center">
                             <Upload className="w-5 h-5 text-slate-400 mb-1" />
                             <span className="text-[10px] font-bold text-slate-600 block leading-tight">Arraste fotos aqui ou clique para selecionar</span>
-                            <span className="text-[9px] text-slate-400 font-normal leading-none mt-0.5">Suporta formatos de imagens nativos</span>
+                            <span className="text-[9px] text-slate-400 font-normal leading-none mt-0.5">Selecione uma ou múltiplas imagens (sem limite)</span>
                           </label>
                         </div>
 
-                        {/* Presets and Preview list */}
-                        <div className="w-full md:w-2/3 flex gap-2">
-                          {act.imagens && act.imagens.length > 0 ? (
-                            act.imagens.slice(0,2).map((img, imgIdx) => (
-                              <div key={imgIdx} className="relative w-1/2 aspect-[4/3] rounded border border-slate-200 overflow-hidden bg-slate-100 flex items-center justify-center">
-                                <img src={img} alt="Anexo atividade" className="w-full h-full object-cover animate-fade-in" />
+                        {/* Preview list */}
+                        {act.imagens && act.imagens.length > 0 ? (
+                          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2 pt-1">
+                            {act.imagens.map((img, imgIdx) => (
+                              <div key={imgIdx} className="relative aspect-[4/3] rounded border border-slate-200 overflow-hidden bg-slate-100 flex items-center justify-center group">
+                                <img src={img} alt={`Anexo atividade ${imgIdx + 1}`} className="w-full h-full object-cover animate-fade-in" />
+                                <div className="absolute top-1 left-1 bg-black/60 text-white px-1.5 py-0.5 rounded text-[9px] font-bold">
+                                  #{imgIdx + 1}
+                                </div>
                                 <button
+                                  type="button"
                                   onClick={() => {
                                     const otherImgs = act.imagens?.filter((_, i) => i !== imgIdx) || [];
                                     handleUpdateActivity(idx, { imagens: otherImgs });
                                   }}
-                                  className="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white w-5 h-5 flex items-center justify-center rounded-full shadow-md text-xs leading-none"
+                                  className="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white w-5 h-5 flex items-center justify-center rounded-full shadow-md text-xs leading-none cursor-pointer"
                                   title="Remover imagem"
                                 >
                                   ×
                                 </button>
                               </div>
-                            ))
-                          ) : (
-                            <div className="w-full flex items-center justify-center text-[10px] text-slate-400 border border-slate-200 bg-slate-50/50 rounded italic font-medium">
-                              Sem anexos de imagem. Use os presets abaixo para simulação.
-                            </div>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Presets Row */}
-                      <div className="flex gap-2 text-[9px] items-center text-slate-500 font-medium">
-                        <span className="uppercase tracking-wider font-semibold text-[8px] text-slate-400">Inserção Rápida:</span>
-                        <button
-                          onClick={() => {
-                            const current = act.imagens || [];
-                            handleUpdateActivity(idx, {
-                              imagens: [...current.slice(-1), "https://images.unsplash.com/photo-1541888946425-d81bb19240f5?auto=format&fit=crop&q=80&w=400"]
-                            });
-                          }}
-                          className="bg-amber-500/10 text-amber-700 font-bold px-2 py-0.5 rounded hover:bg-amber-500/20 transition-all cursor-pointer"
-                        >
-                          Concretagem
-                        </button>
-                        <button
-                          onClick={() => {
-                            const current = act.imagens || [];
-                            handleUpdateActivity(idx, {
-                              imagens: [...current.slice(-1), "https://images.unsplash.com/photo-1504307651254-35680f356dfd?auto=format&fit=crop&q=80&w=400"]
-                            });
-                          }}
-                          className="bg-amber-500/10 text-amber-700 font-bold px-2 py-0.5 rounded hover:bg-amber-500/20 transition-all cursor-pointer"
-                        >
-                          Escavação
-                        </button>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="p-2 flex items-center justify-center text-[10px] text-slate-400 border border-slate-200 bg-slate-50/50 rounded italic font-medium">
+                            Sem anexos de imagem. Arraste ou selecione suas fotos acima.
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -1998,28 +1999,29 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
                     </thead>
                     <tbody className="divide-y divide-slate-150">
                       {(() => {
-                        const sortedItems = sortLaborGroupItems(group.items);
-                        const moiItems = sortedItems.filter(i => i.moiMod === "MOI");
-                        const modItems = sortedItems.filter(i => i.moiMod !== "MOI");
+                        const itemsList = group.items || [];
+                        const moiItems = itemsList.filter(i => i.moiMod === "MOI");
+                        const modItems = itemsList.filter(i => i.moiMod !== "MOI");
 
-                        const renderRow = (item: LaborDetailItem, iIdx: number) => (
+                        const renderRow = (item: LaborDetailItem) => (
                           <tr key={item.id} className="hover:bg-slate-50/50">
                             <td className="p-1.5">
                               <input
                                 type="text"
                                 value={item.cargo}
-                                onChange={(e) => handleUpdateLaborItem(gIdx, iIdx, { cargo: e.target.value })}
+                                onChange={(e) => handleUpdateLaborItem(gIdx, item.id, { cargo: e.target.value })}
+                                placeholder="Digite o cargo / função (ex: Servente, Carpinteiro...)"
                                 className="h-8 w-full rounded border-slate-300 text-xs text-slate-800 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 bg-slate-50/10 hover:bg-slate-50/50 transition-colors"
                               />
                             </td>
                             <td className="p-1.5 text-center">
                               <select
                                 value={item.moiMod}
-                                onChange={(e) => handleUpdateLaborItem(gIdx, iIdx, { moiMod: e.target.value })}
+                                onChange={(e) => handleUpdateLaborItem(gIdx, item.id, { moiMod: e.target.value as "MOI" | "MOD" })}
                                 className="h-8 rounded border-slate-300 text-xs text-slate-850 py-0.5 w-full focus:border-amber-500 focus:ring-1 focus:ring-amber-500 bg-slate-50/10 cursor-pointer"
                               >
-                                <option value="MOD">Direct (MOD)</option>
-                                <option value="MOI">Indirect (MOI)</option>
+                                <option value="MOD">Direta (MOD)</option>
+                                <option value="MOI">Indireta (MOI)</option>
                               </select>
                             </td>
                             <td className="p-1.5 text-center">
@@ -2027,7 +2029,7 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
                                 type="number"
                                 min="0"
                                 value={item.c}
-                                onChange={(e) => handleUpdateLaborItem(gIdx, iIdx, { c: Number(e.target.value) })}
+                                onChange={(e) => handleUpdateLaborItem(gIdx, item.id, { c: Number(e.target.value) })}
                                 className="h-8 w-16 text-center font-mono rounded border-slate-300 text-xs text-slate-800 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 bg-slate-50/10"
                               />
                             </td>
@@ -2036,7 +2038,7 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
                                 type="number"
                                 min="0"
                                 value={item.f}
-                                onChange={(e) => handleUpdateLaborItem(gIdx, iIdx, { f: Number(e.target.value) })}
+                                onChange={(e) => handleUpdateLaborItem(gIdx, item.id, { f: Number(e.target.value) })}
                                 className="h-8 w-16 text-center font-mono rounded border-slate-300 text-xs text-slate-800 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 bg-slate-50/10"
                               />
                             </td>
@@ -2045,7 +2047,7 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
                                 type="number"
                                 min="0"
                                 value={item.a}
-                                onChange={(e) => handleUpdateLaborItem(gIdx, iIdx, { a: Number(e.target.value) })}
+                                onChange={(e) => handleUpdateLaborItem(gIdx, item.id, { a: Number(e.target.value) })}
                                 className="h-8 w-16 text-center font-mono rounded border-slate-300 text-xs text-slate-800 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 bg-slate-50/10"
                               />
                             </td>
@@ -2054,8 +2056,9 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
                             </td>
                             <td className="p-1.5 text-center">
                               <button
-                                onClick={() => handleDeleteLaborRow(gIdx, iIdx)}
+                                onClick={() => handleDeleteLaborRow(gIdx, item.id)}
                                 className="text-red-500 hover:text-red-700 p-1.5 bg-red-50 hover:bg-red-100 transition-colors rounded cursor-pointer"
+                                title="Remover função"
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
                               </button>
@@ -2080,10 +2083,7 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
                               </td>
                             </tr>
                             {moiItems.length > 0 ? (
-                              moiItems.map((item) => {
-                                const realIdx = group.items.findIndex(it => it.id === item.id);
-                                return renderRow(item, realIdx !== -1 ? realIdx : 0);
-                              })
+                              moiItems.map((item) => renderRow(item))
                             ) : (
                               <tr>
                                 <td colSpan={7} className="px-3 py-1.5 text-center text-slate-400 italic text-[10px]">
@@ -2107,10 +2107,7 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
                               </td>
                             </tr>
                             {modItems.length > 0 ? (
-                              modItems.map((item) => {
-                                const realIdx = group.items.findIndex(it => it.id === item.id);
-                                return renderRow(item, realIdx !== -1 ? realIdx : 0);
-                              })
+                              modItems.map((item) => renderRow(item))
                             ) : (
                               <tr>
                                 <td colSpan={7} className="px-3 py-1.5 text-center text-slate-400 italic text-[10px]">
