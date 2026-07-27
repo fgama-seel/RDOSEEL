@@ -17,6 +17,7 @@ import {
 } from "../types";
 import { compressImage } from "../utils/imageUtils";
 import { useRdoStore } from "../context/RdoContext";
+import { RichTextarea } from "./RichTextarea";
 import { 
   Save, 
   Trash2, 
@@ -1322,8 +1323,8 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
                           <p className="text-slate-800 font-semibold leading-relaxed">{act.descricao || "Selecione uma atividade para exibir sua especificação de diário."}</p>
                         </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
-                          <div>
+                        <div className="space-y-3 pt-1">
+                          <div className="w-full md:w-1/2">
                             <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-tight">Metragem / Total do Dia ({act.intervalo || "Un"}) *</label>
                             <input
                               type="text"
@@ -1335,13 +1336,12 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
                           </div>
 
                           <div>
-                            <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-tight">Comentários Especiais do Dia</label>
-                            <input
-                              type="text"
+                            <RichTextarea
+                              label="Comentários Especiais do Dia"
                               value={act.comentario || ""}
-                              onChange={(e) => handleUpdateActivity(idx, { comentario: e.target.value })}
-                              className="mt-1 block h-8 w-full rounded border-slate-300 text-xs text-slate-800 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 bg-slate-50/20"
-                              placeholder="Comentar equipe envolvida, trecho exato, etc."
+                              onChange={(val) => handleUpdateActivity(idx, { comentario: val })}
+                              placeholder="Comentar equipe envolvida, trecho exato, observações da atividade..."
+                              rows={2}
                             />
                           </div>
                         </div>
@@ -1848,15 +1848,12 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
 
                         {/* Notes and Comments */}
                         <div className="mt-2">
-                          <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">
-                            Notas Explicativas, Justificativas e Comentários da Paralisação
-                          </label>
-                          <textarea
-                            rows={3}
-                            value={row.comentarios}
-                            onChange={(e) => handleUpdateStoppage(catKey as any, { comentarios: e.target.value })}
-                            className="block w-full p-2.5 rounded-lg border border-slate-300 text-xs text-slate-800 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 bg-white placeholder:text-slate-400"
+                          <RichTextarea
+                            label="Notas Explicativas, Justificativas e Comentários da Paralisação"
+                            value={row.comentarios || ""}
+                            onChange={(val) => handleUpdateStoppage(catKey as any, { comentarios: val })}
                             placeholder="Descreva detalhadamente as justificativas, motivos climáticos, operacionais ou interferências associadas..."
+                            rows={3}
                           />
                         </div>
                       </div>

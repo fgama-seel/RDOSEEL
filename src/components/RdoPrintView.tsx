@@ -8,6 +8,7 @@ import { RdoReport, StoppageDetailRow } from "../types";
 import { RainChart } from "./RainChart";
 import { ArrowLeft, Printer, ShieldCheck, FileText, ChevronLeft, ChevronRight } from "lucide-react";
 import { useRdoStore } from "../context/RdoContext";
+import { FormattedText } from "./RichTextarea";
 
 interface RdoPrintViewProps {
   report?: RdoReport;
@@ -512,8 +513,9 @@ const SingleReportPrint: React.FC<{ report: RdoReport }> = ({ report }) => {
                     </div>
 
                     {act.comentario && (
-                      <p className="mt-1.5 ml-2 text-[8px] italic text-[#004899] bg-[#004899]/5 px-2 py-0.5 rounded-sm">
-                        COMENTÁRIO: {act.comentario}
+                      <p className="mt-1.5 ml-2 text-[8px] text-[#004899] bg-[#004899]/5 px-2 py-0.5 rounded-sm">
+                        <span className="font-bold italic mr-1">COMENTÁRIO:</span>
+                        <FormattedText text={act.comentario} />
                       </p>
                     )}
 
@@ -677,7 +679,7 @@ const SingleReportPrint: React.FC<{ report: RdoReport }> = ({ report }) => {
                             {row.comentarios && row.comentarios.trim() !== "" && (
                               <div className="text-[7.5px] bg-blue-50/70 border border-blue-200/80 p-1.5 rounded text-blue-900 leading-tight">
                                 <span className="font-bold uppercase text-blue-950 mr-1">Nota Explicativa:</span>
-                                {row.comentarios}
+                                <FormattedText text={row.comentarios} />
                               </div>
                             )}
                           </div>

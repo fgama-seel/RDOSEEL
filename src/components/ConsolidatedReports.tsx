@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect } from "react";
 import { 
   useRdoStore 
 } from "../context/RdoContext";
+import { RichTextarea, FormattedText } from "./RichTextarea";
 import { 
   BarChart, 
   Bar, 
@@ -3190,11 +3191,13 @@ export const ConsolidatedReports: React.FC = () => {
                               )}
                             </div>
 
-                            <p className={`text-xs text-slate-800 font-medium leading-relaxed whitespace-pre-wrap bg-white/80 p-2.5 rounded-lg border border-amber-200/80 ${!isExpanded ? "line-clamp-2" : ""}`}>
-                              {ev.comentarios || ev.maoDeObraParalisadaText || (
+                            <div className={`text-xs text-slate-800 font-medium leading-relaxed whitespace-pre-wrap bg-white/80 p-2.5 rounded-lg border border-amber-200/80 ${!isExpanded ? "line-clamp-2" : ""}`}>
+                              {ev.comentarios || ev.maoDeObraParalisadaText ? (
+                                <FormattedText text={ev.comentarios || ev.maoDeObraParalisadaText} />
+                              ) : (
                                 <span className="text-slate-400 italic">Nenhuma observação textual foi detalhada no diário de obras para este evento.</span>
                               )}
-                            </p>
+                            </div>
                           </div>
                         </div>
                       );
@@ -3465,16 +3468,14 @@ export const ConsolidatedReports: React.FC = () => {
                               <td className="p-3.5 align-top">
                                 {isEditing ? (
                                   <div className="space-y-2">
-                                    <textarea
-                                      rows={3}
+                                    <RichTextarea
                                       value={editingCommentText}
-                                      onChange={(e) => setEditingCommentText(e.target.value)}
+                                      onChange={(val) => setEditingCommentText(val)}
                                       placeholder={item.sourceType === "atividade" 
                                         ? "Digite o comentário especial para esta atividade..." 
                                         : "Digite o comentário/justificativa para esta paralisação..."
                                       }
-                                      className="w-full p-2.5 bg-white border border-amber-400 rounded-xl text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500/30"
-                                      autoFocus
+                                      rows={3}
                                     />
                                     <div className="flex items-center gap-2">
                                       <button
@@ -3501,7 +3502,7 @@ export const ConsolidatedReports: React.FC = () => {
                                   <div>
                                     {item.comentario && item.comentario.trim() !== "" ? (
                                       <div className="p-2.5 bg-slate-50 border border-slate-200/80 rounded-xl text-slate-800 text-xs leading-relaxed whitespace-pre-wrap">
-                                        {item.comentario}
+                                        <FormattedText text={item.comentario} />
                                       </div>
                                     ) : (
                                       <span className="text-slate-400 italic text-xs block py-1">
