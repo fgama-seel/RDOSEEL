@@ -606,14 +606,24 @@ const SingleReportPrint: React.FC<{ report: RdoReport }> = ({ report }) => {
                 const activeParalisacoes = Object.entries(report.paralisacoesDetalhe || {}).filter(([, rowVal]) => {
                   const row = rowVal as StoppageDetailRow;
                   if (!row) return false;
+
+                  // Se explicitamente desativado pelo usuário, nunca exibe
+                  if (row.ativo === false) return false;
+
+                  // Se explicitamente marcado pelo usuário, exibe
+                  if (row.ativo === true) return true;
+
+                  // Para dados legados onde 'ativo' não foi definido explicitamente:
+                  const rowAny = row as any;
                   const hasHours = Boolean(row.horas && row.horas.length > 0);
                   const hasComment = Boolean(row.comentarios && row.comentarios.trim());
-                  const hasFrentes = Boolean(
-                    (row.frentesItems && row.frentesItems.length > 0) ||
-                    (row.frentes && row.frentes.trim())
-                  );
-                  const hasTotal = Boolean(row.total && row.total !== "0h");
-                  return row.ativo || hasHours || hasComment || hasFrentes || hasTotal;
+                  const hasFrentesItems = Boolean(row.frentesItems && row.frentesItems.length > 0);
+                  const hasLaborItems = Boolean(rowAny.laborItems && rowAny.laborItems.length > 0);
+                  const hasEquipItems = Boolean(rowAny.equipItems && rowAny.equipItems.length > 0);
+                  const hasCustomFrentes = Boolean(row.frentes && row.frentes.trim() && row.frentes !== "Todas as frentes");
+                  const hasTotal = Boolean(row.total && row.total !== "0h" && row.total !== "0");
+
+                  return hasHours || hasComment || hasFrentesItems || hasLaborItems || hasEquipItems || hasCustomFrentes || hasTotal;
                 });
 
                 if (activeParalisacoes.length === 0) {
