@@ -45,7 +45,8 @@ import {
   Edit3,
   Save,
   X,
-  Check
+  Check,
+  RefreshCw
 } from "lucide-react";
 import * as XLSX from "xlsx";
 
@@ -86,6 +87,8 @@ export const ConsolidatedReports: React.FC = () => {
   const [expandedObsMap, setExpandedObsMap] = useState<Record<string, boolean>>({});
 
   // Special Comments States & Logic
+  const [specialCommentSource, setSpecialCommentSource] = useState<"atividades" | "paralisacoes">("atividades");
+  const [isSourceModalOpen, setIsSourceModalOpen] = useState<boolean>(false);
   const [commentSearchQuery, setCommentSearchQuery] = useState<string>("");
   const [commentStatusFilter, setCommentStatusFilter] = useState<"todos" | "editaveis" | "assinados">("todos");
   const [commentOnlyFilter, setCommentOnlyFilter] = useState<boolean>(true);
@@ -115,17 +118,30 @@ export const ConsolidatedReports: React.FC = () => {
     numeroRdo: number | string;
     data: string;
     obraNome: string;
-    activityId: string;
-    activityCode: string;
-    activityDesc: string;
-    activityTotal: string;
-    activityUnit: string;
+    sourceType: "atividade" | "paralisacao";
+    activityId?: string;
+    activityCode?: string;
+    activityDesc?: string;
+    activityTotal?: string;
+    activityUnit?: string;
+    actIdx?: number;
+    stoppageKey?: string;
+    stoppageName?: string;
+    stoppageHours?: string;
+    stoppageFrentes?: string;
     comentario: string;
     isSigned: boolean;
     signedCount: number;
     reportRef: any;
-    actIdx: number;
   }
+
+  const stoppageCatLabels: Record<string, string> = {
+    chuva: "Chuva / Clima",
+    raios: "Raios / Descargas Elétricas",
+    projetos: "Projetos / Modificações",
+    vizinhos: "Vizinhos / Interferências Externas",
+    outros: "Outros Motivos"
+  };
 
   const specialCommentsData = useMemo(() => {
     const items: SpecialCommentItem[] = [];
@@ -142,29 +158,58 @@ export const ConsolidatedReports: React.FC = () => {
         (report.gerenciadoraAssinado ? 1 : 0) +
         (report.contratanteAssinado ? 1 : 0);
 
-      (report.atividades || []).forEach((act, actIdx) => {
-        items.push({
-          id: `${report.id}_${act.id || actIdx}`,
-          reportId: report.id,
-          numeroRdo: report.rdoNo || report.id || "-",
-          data: report.data,
-          obraNome: report.obra || currentObra?.nome || "",
-          activityId: act.id || `act-${actIdx}`,
-          activityCode: act.identificador || "-",
-          activityDesc: act.descricao || "Atividade sem descrição",
-          activityTotal: act.total || "0",
-          activityUnit: act.intervalo || "Un",
-          comentario: act.comentario || "",
-          isSigned,
-          signedCount,
-          reportRef: report,
-          actIdx
+      if (specialCommentSource === "atividades") {
+        (report.atividades || []).forEach((act, actIdx) => {
+          items.push({
+            id: `${report.id}_act_${act.id || actIdx}`,
+            reportId: report.id,
+            numeroRdo: report.rdoNo || report.id || "-",
+            data: report.data,
+            obraNome: report.obra || currentObra?.nome || "",
+            sourceType: "atividade",
+            activityId: act.id || `act-${actIdx}`,
+            activityCode: act.identificador || "-",
+            activityDesc: act.descricao || "Atividade sem descrição",
+            activityTotal: act.total || "0",
+            activityUnit: act.intervalo || "Un",
+            comentario: act.comentario || "",
+            isSigned,
+            signedCount,
+            reportRef: report,
+            actIdx
+          });
         });
-      });
+      } else {
+        const paralisacoes = report.paralisacoesDetalhe || {};
+        const catKeys = ["chuva", "raios", "projetos", "vizinhos", "outros"];
+        
+        catKeys.forEach(catKey => {
+          const catVal = paralisacoes[catKey] as any;
+          if (catVal) {
+            const com = catVal.comentarios || "";
+            items.push({
+              id: `${report.id}_paralisacao_${catKey}`,
+              reportId: report.id,
+              numeroRdo: report.rdoNo || report.id || "-",
+              data: report.data,
+              obraNome: report.obra || currentObra?.nome || "",
+              sourceType: "paralisacao",
+              stoppageKey: catKey,
+              stoppageName: stoppageCatLabels[catKey] || catKey,
+              stoppageHours: catVal.total || "0h",
+              stoppageFrentes: catVal.frentes || "Todas as frentes",
+              comentario: com,
+              isSigned,
+              signedCount,
+              reportRef: report
+            });
+          }
+        });
+      }
     });
 
     return items;
-  }, [filteredReports, currentObra]);
+  }, [filteredReports, currentObra, specialCommentSource]);
 
   const filteredSpecialComments = useMemo(() => {
     return specialCommentsData.filter(item => {
@@ -177,12 +222,21 @@ export const ConsolidatedReports: React.FC = () => {
       if (commentSearchQuery.trim() !== "") {
         const q = commentSearchQuery.toLowerCase();
         const matchComment = (item.comentario || "").toLowerCase().includes(q);
-        const matchDesc = (item.activityDesc || "").toLowerCase().includes(q);
-        const matchCode = (item.activityCode || "").toLowerCase().includes(q);
         const matchRdo = String(item.numeroRdo).toLowerCase().includes(q);
         const matchDate = (item.data || "").includes(q);
-        if (!matchComment && !matchDesc && !matchCode && !matchRdo && !matchDate) {
-          return false;
+
+        if (item.sourceType === "atividade") {
+          const matchDesc = (item.activityDesc || "").toLowerCase().includes(q);
+          const matchCode = (item.activityCode || "").toLowerCase().includes(q);
+          if (!matchComment && !matchDesc && !matchCode && !matchRdo && !matchDate) {
+            return false;
+          }
+        } else {
+          const matchStoppage = (item.stoppageName || "").toLowerCase().includes(q);
+          const matchFrentes = (item.stoppageFrentes || "").toLowerCase().includes(q);
+          if (!matchComment && !matchStoppage && !matchFrentes && !matchRdo && !matchDate) {
+            return false;
+          }
         }
       }
 
@@ -213,22 +267,41 @@ export const ConsolidatedReports: React.FC = () => {
     try {
       setIsSavingComment(true);
       const targetReport = reports.find(r => r.id === item.reportId) || item.reportRef;
-      
-      const updatedAtividades = (targetReport.atividades || []).map((act: any, idx: number) => {
-        if (idx === item.actIdx || (act.id && act.id === item.activityId)) {
-          return {
-            ...act,
-            comentario: editingCommentText
-          };
-        }
-        return act;
-      });
+      let updatedReport: any;
 
-      const updatedReport = {
-        ...targetReport,
-        atividades: updatedAtividades,
-        updatedAt: new Date().toISOString()
-      };
+      if (item.sourceType === "atividade") {
+        const updatedAtividades = (targetReport.atividades || []).map((act: any, idx: number) => {
+          if (idx === item.actIdx || (act.id && act.id === item.activityId)) {
+            return {
+              ...act,
+              comentario: editingCommentText
+            };
+          }
+          return act;
+        });
+
+        updatedReport = {
+          ...targetReport,
+          atividades: updatedAtividades,
+          updatedAt: new Date().toISOString()
+        };
+      } else {
+        const key = item.stoppageKey || "chuva";
+        const existingParalisacoes = targetReport.paralisacoesDetalhe || {};
+        const existingCat = existingParalisacoes[key] || {};
+
+        updatedReport = {
+          ...targetReport,
+          paralisacoesDetalhe: {
+            ...existingParalisacoes,
+            [key]: {
+              ...existingCat,
+              comentarios: editingCommentText
+            }
+          },
+          updatedAt: new Date().toISOString()
+        };
+      }
 
       if (saveReport) {
         await saveReport(updatedReport);
@@ -250,17 +323,35 @@ export const ConsolidatedReports: React.FC = () => {
       return;
     }
 
-    const excelRows = filteredSpecialComments.map(item => ({
-      "Data do RDO": item.data ? item.data.split("-").reverse().join("/") : "",
-      "Nº RDO": `#${item.numeroRdo}`,
-      "Obra": item.obraNome,
-      "Código Atividade": item.activityCode,
-      "Descrição da Atividade": item.activityDesc,
-      "Metragem / Qtd Dia": `${item.activityTotal} ${item.activityUnit}`,
-      "Comentário Especial do Dia": item.comentario || "Sem comentário",
-      "Status do RDO": item.isSigned ? `Assinado (${item.signedCount}/3)` : "Em Aberto (Sem assinatura)",
-      "Pode ser Alterado?": item.isSigned ? "Não (RDO Assinado)" : "Sim (Editável)"
-    }));
+    const excelRows = filteredSpecialComments.map(item => {
+      if (item.sourceType === "atividade") {
+        return {
+          "Data do RDO": item.data ? item.data.split("-").reverse().join("/") : "",
+          "Nº RDO": `#${item.numeroRdo}`,
+          "Obra": item.obraNome,
+          "Origem": "Atividade",
+          "Código / Categoria": item.activityCode,
+          "Descrição / Item": item.activityDesc,
+          "Avanço / Horas": `${item.activityTotal} ${item.activityUnit}`,
+          "Comentário Especial do Dia": item.comentario || "Sem comentário",
+          "Status do RDO": item.isSigned ? `Assinado (${item.signedCount}/3)` : "Em Aberto (Sem assinatura)",
+          "Pode ser Alterado?": item.isSigned ? "Não (RDO Assinado)" : "Sim (Editável)"
+        };
+      } else {
+        return {
+          "Data do RDO": item.data ? item.data.split("-").reverse().join("/") : "",
+          "Nº RDO": `#${item.numeroRdo}`,
+          "Obra": item.obraNome,
+          "Origem": "Paralisação",
+          "Código / Categoria": "Paralisação",
+          "Descrição / Item": item.stoppageName,
+          "Avanço / Horas": `Total: ${item.stoppageHours} (${item.stoppageFrentes})`,
+          "Comentário Especial do Dia": item.comentario || "Sem comentário",
+          "Status do RDO": item.isSigned ? `Assinado (${item.signedCount}/3)` : "Em Aberto (Sem assinatura)",
+          "Pode ser Alterado?": item.isSigned ? "Não (RDO Assinado)" : "Sim (Editável)"
+        };
+      }
+    });
 
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.json_to_sheet(excelRows);
@@ -269,16 +360,18 @@ export const ConsolidatedReports: React.FC = () => {
       { wch: 12 },
       { wch: 10 },
       { wch: 22 },
+      { wch: 14 },
       { wch: 18 },
-      { wch: 42 },
-      { wch: 16 },
+      { wch: 38 },
+      { wch: 24 },
       { wch: 55 },
       { wch: 22 },
       { wch: 20 }
     ];
 
     XLSX.utils.book_append_sheet(wb, ws, "Comentários Especiais");
-    const fileName = `Comentarios_Especiais_${(currentObra?.nome || "Obra").replace(/\s+/g, "_")}_${startDate}_a_${endDate}.xlsx`;
+    const origName = specialCommentSource === "atividades" ? "Atividades" : "Paralisacoes";
+    const fileName = `Comentarios_${origName}_${(currentObra?.nome || "Obra").replace(/\s+/g, "_")}_${startDate}_a_${endDate}.xlsx`;
     XLSX.writeFile(wb, fileName);
   };
 
@@ -3112,29 +3205,74 @@ export const ConsolidatedReports: React.FC = () => {
             </div>
           )}
 
-          {/* TAB 5: COMENTÁRIOS ESPECIAIS DO DIA DAS ATIVIDADES */}
+          {/* TAB 5: COMENTÁRIOS ESPECIAIS DO DIA (ATIVIDADES / PARALISAÇÕES) */}
           {activeSubTab === "comentariosEspeciais" && (
             <div className="space-y-6">
-              {/* Header Title */}
+              {/* Header Title & Mode Controls */}
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs">
-                <div>
-                  <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
-                    <MessageSquare className="w-5 h-5 text-amber-600" />
-                    Comentários Especiais do Dia por Atividade
-                  </h3>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Consolidado de todas as observações registradas nas atividades. Comentários de RDOs sem assinatura podem ser editados diretamente nesta tela.
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
+                      <MessageSquare className="w-5 h-5 text-amber-600" />
+                      Comentários Especiais do Dia ({specialCommentSource === "atividades" ? "Por Atividade" : "Por Paralisação"})
+                    </h3>
+                    
+                    <button
+                      type="button"
+                      onClick={() => setIsSourceModalOpen(true)}
+                      className="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300/80 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                      title="Abrir modal para trocar origem dos comentários"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5 text-amber-700" />
+                      <span>Alternar Exibição</span>
+                    </button>
+                  </div>
+                  <p className="text-xs text-slate-500">
+                    {specialCommentSource === "atividades"
+                      ? "Consolidado de todas as observações registradas no avanço diário das atividades. Comentários de RDOs sem assinatura podem ser editados diretamente."
+                      : "Consolidado de todas as observações e justificativas registradas nas paralisações (Chuva, Raios, Projetos, Vizinhos, Outros)."
+                    }
                   </p>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={handleExportCommentsToExcel}
-                  className="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-2 shadow-xs cursor-pointer self-start md:self-auto shrink-0"
-                >
-                  <FileSpreadsheet className="w-4 h-4" />
-                  Exportar para Excel
-                </button>
+                <div className="flex items-center gap-3 self-start md:self-auto shrink-0 flex-wrap">
+                  {/* Segmented Control Buttons */}
+                  <div className="bg-slate-100 p-1 rounded-xl flex items-center gap-1 border border-slate-200">
+                    <button
+                      type="button"
+                      onClick={() => setSpecialCommentSource("atividades")}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                        specialCommentSource === "atividades"
+                          ? "bg-white text-slate-800 shadow-xs border border-slate-200/60 font-extrabold"
+                          : "text-slate-600 hover:text-slate-900"
+                      }`}
+                    >
+                      <span>📌 Atividades</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setSpecialCommentSource("paralisacoes")}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                        specialCommentSource === "paralisacoes"
+                          ? "bg-amber-600 text-white shadow-xs font-extrabold"
+                          : "text-slate-600 hover:text-slate-900"
+                      }`}
+                    >
+                      <span>🛑 Paralisações</span>
+                    </button>
+                  </div>
+
+                  {/* Export Button */}
+                  <button
+                    type="button"
+                    onClick={handleExportCommentsToExcel}
+                    className="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-2 shadow-xs cursor-pointer"
+                  >
+                    <FileSpreadsheet className="w-4 h-4" />
+                    Exportar
+                  </button>
+                </div>
               </div>
 
               {/* KPI Cards */}
@@ -3145,7 +3283,7 @@ export const ConsolidatedReports: React.FC = () => {
                     <span className="text-2xl font-extrabold text-slate-800">{commentStats.totalComments}</span>
                     <MessageSquare className="w-5 h-5 text-amber-500/80" />
                   </div>
-                  <span className="text-[10px] text-slate-400 block">Comentários inseridos no período</span>
+                  <span className="text-[10px] text-slate-400 block">Observações de {specialCommentSource === "atividades" ? "atividades" : "paralisações"}</span>
                 </div>
 
                 <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs space-y-1">
@@ -3154,7 +3292,7 @@ export const ConsolidatedReports: React.FC = () => {
                     <span className="text-2xl font-extrabold text-slate-800">{commentStats.distinctReports}</span>
                     <FileText className="w-5 h-5 text-blue-500/80" />
                   </div>
-                  <span className="text-[10px] text-slate-400 block">Diários com comentários</span>
+                  <span className="text-[10px] text-slate-400 block">Diários com texto preenchido</span>
                 </div>
 
                 <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs space-y-1">
@@ -3199,7 +3337,10 @@ export const ConsolidatedReports: React.FC = () => {
                       type="text"
                       value={commentSearchQuery}
                       onChange={(e) => setCommentSearchQuery(e.target.value)}
-                      placeholder="Buscar por comentário, atividade, código ou nº de RDO..."
+                      placeholder={specialCommentSource === "atividades"
+                        ? "Buscar por comentário, atividade, código ou nº de RDO..."
+                        : "Buscar por comentário, motivo de paralisação, frentes ou nº de RDO..."
+                      }
                       className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
                     />
                   </div>
@@ -3229,7 +3370,7 @@ export const ConsolidatedReports: React.FC = () => {
                     className="w-4 h-4 rounded border-slate-300 text-amber-600 focus:ring-amber-500 cursor-pointer"
                   />
                   <label htmlFor="chk-only-comments" className="text-xs font-medium text-slate-700 cursor-pointer select-none">
-                    Exibir apenas atividades com comentário preenchido ({specialCommentsData.filter(i => i.comentario && i.comentario.trim() !== "").length} itens)
+                    Exibir apenas {specialCommentSource === "atividades" ? "atividades" : "paralisações"} com comentário preenchido ({specialCommentsData.filter(i => i.comentario && i.comentario.trim() !== "").length} itens)
                   </label>
                 </div>
               </div>
@@ -3239,8 +3380,8 @@ export const ConsolidatedReports: React.FC = () => {
                 {filteredSpecialComments.length === 0 ? (
                   <div className="p-12 text-center space-y-3">
                     <MessageSquare className="w-10 h-10 text-slate-300 mx-auto" />
-                    <p className="text-sm font-semibold text-slate-600">Nenhum comentário especial encontrado.</p>
-                    <p className="text-xs text-slate-400">Tente ajustar o filtro de busca, o intervalo de datas ou o filtro de preenchimento.</p>
+                    <p className="text-sm font-semibold text-slate-600">Nenhum comentário especial de {specialCommentSource === "atividades" ? "atividade" : "paralisação"} encontrado.</p>
+                    <p className="text-xs text-slate-400">Tente ajustar o filtro de busca, o intervalo de datas ou alternar o modo de exibição.</p>
                   </div>
                 ) : (
                   <div className="overflow-x-auto">
@@ -3249,7 +3390,9 @@ export const ConsolidatedReports: React.FC = () => {
                         <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
                           <th className="p-3.5 w-32">Data / RDO</th>
                           <th className="p-3.5 w-36">Status RDO</th>
-                          <th className="p-3.5 min-w-[220px]">Atividade & Especificação</th>
+                          <th className="p-3.5 min-w-[220px]">
+                            {specialCommentSource === "atividades" ? "Atividade & Especificação" : "Motivo de Paralisação"}
+                          </th>
                           <th className="p-3.5 min-w-[320px]">Comentário Especial do Dia</th>
                           <th className="p-3.5 w-28 text-center">Ação</th>
                         </tr>
@@ -3287,19 +3430,35 @@ export const ConsolidatedReports: React.FC = () => {
                                 )}
                               </td>
 
-                              {/* Atividade */}
+                              {/* Atividade / Paralisação */}
                               <td className="p-3.5 align-top space-y-1">
-                                <div className="flex items-center gap-1.5 flex-wrap">
-                                  <span className="px-1.5 py-0.5 bg-slate-100 text-slate-700 font-mono text-[10px] font-bold rounded border border-slate-200">
-                                    {item.activityCode}
-                                  </span>
-                                  <span className="font-semibold text-slate-800">
-                                    {item.activityDesc}
-                                  </span>
-                                </div>
-                                <div className="text-[11px] text-slate-500">
-                                  Avanço no dia: <strong className="text-slate-700 font-mono">{item.activityTotal} {item.activityUnit}</strong>
-                                </div>
+                                {item.sourceType === "atividade" ? (
+                                  <>
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <span className="px-1.5 py-0.5 bg-slate-100 text-slate-700 font-mono text-[10px] font-bold rounded border border-slate-200">
+                                        {item.activityCode}
+                                      </span>
+                                      <span className="font-semibold text-slate-800">
+                                        {item.activityDesc}
+                                      </span>
+                                    </div>
+                                    <div className="text-[11px] text-slate-500">
+                                      Avanço no dia: <strong className="text-slate-700 font-mono">{item.activityTotal} {item.activityUnit}</strong>
+                                    </div>
+                                  </>
+                                ) : (
+                                  <>
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <span className="px-2 py-0.5 bg-amber-100 text-amber-900 text-[10.5px] font-bold rounded-lg border border-amber-300">
+                                        {item.stoppageName}
+                                      </span>
+                                    </div>
+                                    <div className="text-[11px] text-slate-500 space-y-0.5">
+                                      <div>Horas Paralisadas: <strong className="text-slate-800 font-mono">{item.stoppageHours}</strong></div>
+                                      <div>Frentes: <span className="text-slate-700 font-medium">{item.stoppageFrentes}</span></div>
+                                    </div>
+                                  </>
+                                )}
                               </td>
 
                               {/* Comentário Especial */}
@@ -3310,7 +3469,10 @@ export const ConsolidatedReports: React.FC = () => {
                                       rows={3}
                                       value={editingCommentText}
                                       onChange={(e) => setEditingCommentText(e.target.value)}
-                                      placeholder="Digite o comentário especial para esta atividade..."
+                                      placeholder={item.sourceType === "atividade" 
+                                        ? "Digite o comentário especial para esta atividade..." 
+                                        : "Digite o comentário/justificativa para esta paralisação..."
+                                      }
                                       className="w-full p-2.5 bg-white border border-amber-400 rounded-xl text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500/30"
                                       autoFocus
                                     />
@@ -3385,6 +3547,109 @@ export const ConsolidatedReports: React.FC = () => {
                     </table>
                   </div>
                 )}
+              </div>
+            </div>
+          )}
+
+          {/* MODAL DE MUDANÇA DE ORIGEM DOS COMENTÁRIOS ESPECIAIS */}
+          {isSourceModalOpen && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-fade-in">
+              <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl w-full max-w-md overflow-hidden animate-scale-up">
+                {/* Modal Header */}
+                <div className="p-5 bg-gradient-to-r from-amber-500 to-amber-600 text-white flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-2 bg-white/10 rounded-xl">
+                      <RefreshCw className="w-5 h-5 text-white" />
+                    </div>
+                    <div>
+                      <h3 className="text-base font-extrabold text-white">Alternar Origem dos Comentários</h3>
+                      <p className="text-[11px] text-amber-100">Selecione o tipo de comentário que deseja visualizar no relatório</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsSourceModalOpen(false)}
+                    className="p-1.5 bg-white/10 hover:bg-white/20 text-white rounded-full transition-colors cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {/* Modal Options Body */}
+                <div className="p-5 space-y-3">
+                  {/* Option 1: Atividades */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSpecialCommentSource("atividades");
+                      setIsSourceModalOpen(false);
+                    }}
+                    className={`w-full p-4 rounded-2xl border text-left transition-all cursor-pointer flex items-start gap-3.5 ${
+                      specialCommentSource === "atividades"
+                        ? "bg-amber-50/80 border-amber-400 ring-2 ring-amber-500/20 shadow-xs"
+                        : "bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50/80"
+                    }`}
+                  >
+                    <div className={`p-2.5 rounded-xl shrink-0 ${
+                      specialCommentSource === "atividades" ? "bg-amber-600 text-white" : "bg-slate-100 text-slate-600"
+                    }`}>
+                      <MessageSquare className="w-5 h-5" />
+                    </div>
+                    <div className="space-y-0.5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-bold text-slate-800">📌 Comentários de Atividades</span>
+                        {specialCommentSource === "atividades" && (
+                          <span className="px-2 py-0.5 bg-amber-600 text-white text-[10px] font-extrabold rounded-full uppercase tracking-wider">Ativo</span>
+                        )}
+                      </div>
+                      <p className="text-xs text-slate-500 leading-relaxed">
+                        Exibe as observações e detalhamentos específicos inseridos diretamente nas atividades de campo dos RDOs.
+                      </p>
+                    </div>
+                  </button>
+
+                  {/* Option 2: Paralisações */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSpecialCommentSource("paralisacoes");
+                      setIsSourceModalOpen(false);
+                    }}
+                    className={`w-full p-4 rounded-2xl border text-left transition-all cursor-pointer flex items-start gap-3.5 ${
+                      specialCommentSource === "paralisacoes"
+                        ? "bg-amber-50/80 border-amber-400 ring-2 ring-amber-500/20 shadow-xs"
+                        : "bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50/80"
+                    }`}
+                  >
+                    <div className={`p-2.5 rounded-xl shrink-0 ${
+                      specialCommentSource === "paralisacoes" ? "bg-amber-600 text-white" : "bg-slate-100 text-slate-600"
+                    }`}>
+                      <AlertTriangle className="w-5 h-5" />
+                    </div>
+                    <div className="space-y-0.5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-bold text-slate-800">🛑 Comentários de Paralisações</span>
+                        {specialCommentSource === "paralisacoes" && (
+                          <span className="px-2 py-0.5 bg-amber-600 text-white text-[10px] font-extrabold rounded-full uppercase tracking-wider">Ativo</span>
+                        )}
+                      </div>
+                      <p className="text-xs text-slate-500 leading-relaxed">
+                        Exibe as justificativas e observações de motivos de parada (Chuva, Raios, Projetos, Vizinhos, Outros).
+                      </p>
+                    </div>
+                  </button>
+                </div>
+
+                {/* Modal Footer */}
+                <div className="p-4 bg-slate-50 border-t border-slate-100 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setIsSourceModalOpen(false)}
+                    className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-xl text-xs transition-colors cursor-pointer"
+                  >
+                    Fechar
+                  </button>
+                </div>
               </div>
             </div>
           )}
