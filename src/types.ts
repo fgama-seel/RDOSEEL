@@ -229,6 +229,7 @@ export interface ObraConfig {
   subcontratadas: string[]; // list of companies
   quadroEfetivos?: ObraEfetivoMember[]; // Quadro de Efetivos cadastrado na Obra
   permissoes: ObraPermission[];
+  permissoesEmails?: string[];
   
   // Default Signers Configured per Obra
   emissorNomeDefault?: string;

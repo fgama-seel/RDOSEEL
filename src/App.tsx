@@ -30,7 +30,8 @@ import {
   Printer,
   BarChart3,
   Bell,
-  FileSignature
+  FileSignature,
+  AlertTriangle
 } from "lucide-react";
 
 // Formatting helper
@@ -64,14 +65,20 @@ function AppContent() {
     currentObra,
     setCurrentObra,
     isGlobalAdmin,
-    getAuditLogs
+    getAuditLogs,
+    firebaseError,
+    clearFirebaseError
   } = useRdoStore();
 
   const currentUserEmail = user && 'email' in user ? (user.email?.toLowerCase() || "") : "";
   const permission = currentObra?.permissoes?.find(p => p?.email?.toLowerCase() === currentUserEmail);
   const accessLevel = permission ? permission.access : (currentObra?.userId === user?.uid ? "owner" : "view");
-  const canManageObras = isGlobalAdmin || (accessLevel !== "view" && accessLevel !== "fiscalizacao" && accessLevel !== "gerenciadora");
-  const canCreateRdo = isGlobalAdmin || (accessLevel !== "view" && accessLevel !== "fiscalizacao" && accessLevel !== "gerenciadora");
+  const isEditor = isGlobalAdmin || accessLevel === "edit" || accessLevel === "owner";
+  const hasQuotaError = Boolean(firebaseError);
+
+  const canManageObras = (isGlobalAdmin || (accessLevel !== "view" && accessLevel !== "fiscalizacao" && accessLevel !== "gerenciadora")) && !hasQuotaError;
+  const canCreateRdo = (isGlobalAdmin || (accessLevel !== "view" && accessLevel !== "fiscalizacao" && accessLevel !== "gerenciadora")) && !hasQuotaError;
+  const showQuotaNotificationInBell = isEditor && hasQuotaError;
 
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<"todos" | "Em Digitação" | "Pendente" | "Finalizado" | "Assinado">("todos");
@@ -90,26 +97,32 @@ function AppContent() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
   const [showObraManager, setShowObraManager] = useState(false);
   const [batchPrintMode, setBatchPrintMode] = useState<"single" | "individual">("single");
+  const [batchStatusFilter, setBatchStatusFilter] = useState<"finalizados_assinados" | "todos">("finalizados_assinados");
 
-  // Collect all finalized reports for the active worksite to print in batch
-  const finalizedReportsToPrint = (reports || []).filter(r => {
-    const isFinalized = (r.status || "Em Digitação") === "Finalizado";
-    if (currentObra) {
-      return isFinalized && r.obraId === currentObra.id;
-    }
-    return isFinalized;
-  });
+  // Collect reports for the active worksite to print in batch
+  const reportsForObraToPrint = React.useMemo(() => {
+    return (reports || []).filter(r => {
+      if (currentObra) {
+        return r.obraId === currentObra.id;
+      }
+      return true;
+    });
+  }, [reports, currentObra]);
 
-  // Computa a lista de RDOs filtrados chronologicamente para o lote
+  // Computa a lista de RDOs filtrados cronologicamente para o lote
   const batchReportsSelected = React.useMemo(() => {
-    return [...finalizedReportsToPrint]
+    return [...reportsForObraToPrint]
       .filter(r => {
+        if (batchStatusFilter === "finalizados_assinados") {
+          const isDone = r.status === "Finalizado" || r.status === "Assinado" || r.status === "Enviado para Fiscalização" || r.emitenteAssinado || r.gerenciadoraAssinado || r.contratanteAssinado;
+          if (!isDone) return false;
+        }
         if (batchStartDate && r.data < batchStartDate) return false;
         if (batchEndDate && r.data > batchEndDate) return false;
         return true;
       })
-      .sort((a, b) => a.data.localeCompare(b.data));
-  }, [finalizedReportsToPrint, batchStartDate, batchEndDate]);
+      .sort((a, b) => (a.data || "").localeCompare(b.data || ""));
+  }, [reportsForObraToPrint, batchStatusFilter, batchStartDate, batchEndDate]);
 
   if (isLoading) {
     return (
@@ -149,13 +162,18 @@ function AppContent() {
     }
 
     if (currentObra) {
-      return matchesSearch && matchesStatus && r.obraId === currentObra.id;
+      return matchesSearch && matchesStatus && (
+        r.obraId === currentObra.id || 
+        r.obra === currentObra.nome || 
+        (!r.obraId && currentObra.id === "obra-saneamento-leste")
+      );
     }
     return matchesSearch && matchesStatus;
   }).sort((a, b) => (b.data || "").localeCompare(a.data || ""));
 
   // Collect all finalized reports for the active worksite to print in batch
   const handleCreateNewRdo = async () => {
+    if (hasQuotaError) return;
     try {
       const freshTemplate = createNewReport();
       await saveReport(freshTemplate);
@@ -166,10 +184,12 @@ function AppContent() {
 
   const handleDeleteClick = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
+    if (hasQuotaError) return;
     setShowDeleteConfirm(id);
   };
 
   const confirmDelete = async () => {
+    if (hasQuotaError) return;
     if (showDeleteConfirm) {
       await deleteReport(showDeleteConfirm);
       setShowDeleteConfirm(null);
@@ -225,6 +245,14 @@ function AppContent() {
               <FileSignature className="w-3.5 h-3.5 text-amber-600" />
               Assinar em Lote
             </button>
+            <button
+              onClick={() => setShowBatchPrintConfig(true)}
+              className="px-3 h-8 rounded-md text-[10px] font-extrabold uppercase tracking-wider transition-all border-none cursor-pointer flex items-center gap-1.5 text-slate-700 hover:text-emerald-700 hover:bg-emerald-50 bg-slate-200/50"
+              title="Impressão em Lote de RDOs com filtro de datas e geração de PDF"
+            >
+              <Printer className="w-3.5 h-3.5 text-emerald-600" />
+              Imprimir Lote
+            </button>
             {isGlobalAdmin && (
               <button
                 onClick={() => { setActiveView("auditoria"); setShowPrintView(false); }}
@@ -252,14 +280,25 @@ function AppContent() {
           <div className="relative">
             <button
               onClick={() => setShowNotificationsPopover(!showNotificationsPopover)}
-              className="relative p-1.5 text-slate-500 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-all border-none bg-transparent cursor-pointer flex items-center justify-center"
-              title="Notificações de Comentários do RDO"
+              className={`relative p-1.5 rounded-lg transition-all border-none bg-transparent cursor-pointer flex items-center justify-center ${
+                showQuotaNotificationInBell
+                  ? "text-red-600 hover:bg-red-50"
+                  : "text-slate-500 hover:text-amber-600 hover:bg-amber-50"
+              }`}
+              title={showQuotaNotificationInBell ? "Alerta de Cota Excedida do Firebase" : "Notificações do Sistema"}
             >
-              <Bell className="w-4 h-4 text-slate-600" />
-              {notificationReports.length > 0 && (
-                <span className="absolute -top-1 -right-1 bg-amber-500 text-white text-[9px] font-black w-4 h-4 rounded-full flex items-center justify-center animate-bounce shadow-xs">
-                  {notificationReports.length}
+              <Bell className={`w-4 h-4 ${showQuotaNotificationInBell ? "text-red-600" : "text-slate-600"}`} />
+              
+              {showQuotaNotificationInBell ? (
+                <span className="absolute -top-1 -right-1 bg-red-600 text-white text-[9px] font-black px-1 py-0.2 rounded-full flex items-center justify-center animate-pulse shadow-xs border border-white">
+                  !
                 </span>
+              ) : (
+                notificationReports.length > 0 && (
+                  <span className="absolute -top-1 -right-1 bg-amber-500 text-white text-[9px] font-black w-4 h-4 rounded-full flex items-center justify-center animate-bounce shadow-xs">
+                    {notificationReports.length}
+                  </span>
+                )
               )}
             </button>
 
@@ -270,7 +309,7 @@ function AppContent() {
                   <div className="flex items-center gap-2">
                     <Bell className="w-4 h-4 text-amber-600" />
                     <h4 className="font-bold text-xs uppercase tracking-wider text-slate-800">
-                      Alertas de Comentários ({notificationReports.length})
+                      Central de Notificações
                     </h4>
                   </div>
                   <button
@@ -281,48 +320,77 @@ function AppContent() {
                   </button>
                 </div>
 
-                {notificationReports.length === 0 ? (
+                {/* Alerta exclusivo para Editores quando a cota do Firebase estourar */}
+                {showQuotaNotificationInBell && (
+                  <div className="p-3 bg-red-50 border border-red-200 rounded-xl space-y-2 text-red-900 shadow-2xs">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 font-extrabold text-xs text-red-700">
+                        <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
+                        <span className="uppercase tracking-wide">Cota do Firebase Excedida</span>
+                      </div>
+                      <button
+                        onClick={clearFirebaseError}
+                        className="text-[9px] font-bold text-red-700 hover:text-red-950 uppercase border-none bg-transparent cursor-pointer hover:underline"
+                        title="Ocultar este aviso"
+                      >
+                        Limpar
+                      </button>
+                    </div>
+                    <p className="text-[11px] text-slate-700 leading-snug">
+                      {firebaseError}
+                    </p>
+                    <div className="text-[10px] text-red-950 font-extrabold bg-red-100/80 p-2 rounded-lg border border-red-200/80 flex items-center gap-1.5">
+                      <span>🔒</span>
+                      <span><b>Edições Travadas:</b> Criação, alteração e exclusão de RDOs foram bloqueadas para evitar divergências nos dados.</span>
+                    </div>
+                  </div>
+                )}
+
+                {notificationReports.length === 0 && !showQuotaNotificationInBell ? (
                   <div className="py-6 text-center text-slate-400 text-xs italic">
-                    Nenhum alerta de comentário pendente no momento.
+                    Nenhuma notificação pendente no momento.
                   </div>
                 ) : (
-                  <div className="max-h-80 overflow-y-auto space-y-2.5 pr-1">
-                    {notificationReports.map((r) => (
-                      <div key={r.id} className="p-3 bg-amber-50/50 hover:bg-amber-50 rounded-xl border border-amber-200/80 transition-colors space-y-2">
-                        <div className="flex items-center justify-between">
-                          <span className="font-extrabold text-xs text-amber-950">
-                            RDO Nº {r.rdoNo} - {formatDateString(r.data)}
-                          </span>
-                          <span className="text-[8px] font-black uppercase px-2 py-0.5 rounded-full bg-amber-200 text-amber-800">
-                            {r.commentNotificationSource || "Comentário"}
-                          </span>
+                  notificationReports.length > 0 && (
+                    <div className="max-h-80 overflow-y-auto space-y-2.5 pr-1">
+                      <h5 className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400">Alertas de Comentários</h5>
+                      {notificationReports.map((r) => (
+                        <div key={r.id} className="p-3 bg-amber-50/50 hover:bg-amber-50 rounded-xl border border-amber-200/80 transition-colors space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="font-extrabold text-xs text-amber-950">
+                              RDO Nº {r.rdoNo} - {formatDateString(r.data)}
+                            </span>
+                            <span className="text-[8px] font-black uppercase px-2 py-0.5 rounded-full bg-amber-200 text-amber-800">
+                              {r.commentNotificationSource || "Comentário"}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-slate-600 line-clamp-2 italic">
+                            "{r.commentNotificationText || "Comentário registrado pela gerenciadora ou fiscalização."}"
+                          </p>
+                          <div className="flex items-center justify-end gap-2 pt-1">
+                            <button
+                              onClick={async () => {
+                                await saveReport({ ...r, hasCommentNotification: false });
+                              }}
+                              className="px-2 py-1 text-[9px] font-bold text-slate-500 hover:text-slate-800 uppercase tracking-wider border-none bg-transparent cursor-pointer"
+                            >
+                              Marcar Lida
+                            </button>
+                            <button
+                              onClick={() => {
+                                setCurrentReport(r);
+                                setActiveView("rdo");
+                                setShowNotificationsPopover(false);
+                              }}
+                              className="px-2.5 py-1 text-[9px] font-extrabold bg-amber-600 hover:bg-amber-700 text-white rounded-md uppercase tracking-wider border-none cursor-pointer shadow-xs"
+                            >
+                              Verificar e Rebater
+                            </button>
+                          </div>
                         </div>
-                        <p className="text-[11px] text-slate-600 line-clamp-2 italic">
-                          "{r.commentNotificationText || "Comentário registrado pela gerenciadora ou fiscalização."}"
-                        </p>
-                        <div className="flex items-center justify-end gap-2 pt-1">
-                          <button
-                            onClick={async () => {
-                              await saveReport({ ...r, hasCommentNotification: false });
-                            }}
-                            className="px-2 py-1 text-[9px] font-bold text-slate-500 hover:text-slate-800 uppercase tracking-wider border-none bg-transparent cursor-pointer"
-                          >
-                            Marcar Lida
-                          </button>
-                          <button
-                            onClick={() => {
-                              setCurrentReport(r);
-                              setActiveView("rdo");
-                              setShowNotificationsPopover(false);
-                            }}
-                            className="px-2.5 py-1 text-[9px] font-extrabold bg-amber-600 hover:bg-amber-700 text-white rounded-md uppercase tracking-wider border-none cursor-pointer shadow-xs"
-                          >
-                            Verificar e Rebater
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
+                  )
                 )}
               </div>
             )}
@@ -394,7 +462,13 @@ function AppContent() {
             {canCreateRdo && (
               <button
                 onClick={handleCreateNewRdo}
-                className="w-full h-9 bg-amber-600 hover:bg-amber-700 text-white rounded font-bold text-xs tracking-wide flex items-center justify-center gap-1.5 transition-all shadow-sm outline-none cursor-pointer"
+                disabled={hasQuotaError}
+                title={hasQuotaError ? "Edições travadas: Cota do Firebase excedida" : "Criar novo Diário de Obra"}
+                className={`w-full h-9 rounded font-bold text-xs tracking-wide flex items-center justify-center gap-1.5 transition-all shadow-sm outline-none ${
+                  hasQuotaError
+                    ? "bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed opacity-80"
+                    : "bg-amber-600 hover:bg-amber-700 text-white cursor-pointer"
+                }`}
               >
                 <Plus className="w-4 h-4 text-yellow-105" />
                 NOVO DIÁRIO DE OBRA (RDO)
@@ -483,12 +557,13 @@ function AppContent() {
               <span className="bg-slate-800 text-slate-300 px-1.5 py-0.5 rounded font-mono text-[9px]">{filteredReports.length}</span>
             </div>
 
-            {finalizedReportsToPrint.length > 0 && (
+            {reportsForObraToPrint.length > 0 && (
               <div className="px-4 py-2 bg-slate-900 border-b border-slate-800/80 flex justify-between items-center shrink-0">
-                <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">Lote de Finalizados ({finalizedReportsToPrint.length})</span>
+                <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">Imprimir RDOs em Lote ({batchReportsSelected.length})</span>
                 <button
                   onClick={() => setShowBatchPrintConfig(true)}
                   className="flex items-center gap-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-[9px] font-bold uppercase tracking-wider px-2 py-1 border-none cursor-pointer transition-all shadow-sm leading-none"
+                  title="Configurar impressão em lote com filtro por período"
                 >
                   <Printer className="w-3 h-3" />
                   Imprimir Lote
@@ -566,8 +641,13 @@ function AppContent() {
                           {canCreateRdo && (
                             <button
                               onClick={(e) => handleDeleteClick(e, report.id!)}
-                              className="text-slate-500 hover:text-red-400 p-0.5 rounded transition-colors"
-                              title="Excluir do histórico"
+                              disabled={hasQuotaError}
+                              title={hasQuotaError ? "Edições travadas: Cota do Firebase excedida" : "Excluir do histórico"}
+                              className={`p-0.5 rounded transition-colors ${
+                                hasQuotaError
+                                  ? "text-slate-700 cursor-not-allowed"
+                                  : "text-slate-500 hover:text-red-400 cursor-pointer"
+                              }`}
                             >
                               <Trash2 className="w-3 h-3" />
                             </button>
@@ -640,14 +720,52 @@ function AppContent() {
       {showBatchPrintConfig && (
         <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl border p-6 max-w-md w-full shadow-2xl space-y-4 text-left">
-            <div className="flex items-center gap-2 border-b border-gray-100 pb-3">
-              <Printer className="w-5 h-5 text-emerald-600" />
-              <div>
-                <h4 className="font-bold text-sm text-gray-950 uppercase tracking-wide">Impressão em Lote (PDF)</h4>
-                <p className="text-[10px] text-gray-500 uppercase tracking-tight font-semibold">Defina o período dos diários finalizados</p>
+            <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+              <div className="flex items-center gap-2">
+                <Printer className="w-5 h-5 text-emerald-600" />
+                <div>
+                  <h4 className="font-bold text-sm text-gray-950 uppercase tracking-wide">Impressão em Lote (PDF)</h4>
+                  <p className="text-[10px] text-gray-500 uppercase tracking-tight font-semibold">Selecione o período e formato para impressão</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowBatchPrintConfig(false)}
+                className="text-slate-400 hover:text-slate-700 text-xs font-bold p-1 rounded border-none bg-transparent cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Filtro de Status */}
+            <div className="space-y-1.5">
+              <label className="block text-[10px] uppercase font-bold text-gray-500">Filtrar por Status dos Diários</label>
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setBatchStatusFilter("finalizados_assinados")}
+                  className={`py-1.5 px-2 rounded-xl border text-center transition-all cursor-pointer font-bold text-[10px] uppercase tracking-wide ${
+                    batchStatusFilter === "finalizados_assinados"
+                      ? "border-emerald-600 bg-emerald-50 text-emerald-800"
+                      : "border-gray-200 text-gray-500 hover:bg-slate-50"
+                  }`}
+                >
+                  Finalizados / Assinados
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBatchStatusFilter("todos")}
+                  className={`py-1.5 px-2 rounded-xl border text-center transition-all cursor-pointer font-bold text-[10px] uppercase tracking-wide ${
+                    batchStatusFilter === "todos"
+                      ? "border-emerald-600 bg-emerald-50 text-emerald-800"
+                      : "border-gray-200 text-gray-500 hover:bg-slate-50"
+                  }`}
+                >
+                  Todos os RDOs da Obra
+                </button>
               </div>
             </div>
 
+            {/* Intervalo de Datas */}
             <div className="grid grid-cols-2 gap-3 text-xs">
               <div>
                 <label className="block text-[10px] uppercase font-bold text-gray-500 mb-1">Data de Início</label>
@@ -660,7 +778,7 @@ function AppContent() {
               </div>
               
               <div>
-                <label className="block text-[10px] uppercase font-bold text-gray-400 mb-1">Data de Fim</label>
+                <label className="block text-[10px] uppercase font-bold text-gray-500 mb-1">Data de Fim</label>
                 <input
                   type="date"
                   value={batchEndDate}
@@ -670,9 +788,20 @@ function AppContent() {
               </div>
             </div>
 
+            {(batchStartDate || batchEndDate) && (
+              <div className="flex justify-end">
+                <button
+                  onClick={() => { setBatchStartDate(""); setBatchEndDate(""); }}
+                  className="text-[10px] text-amber-600 hover:text-amber-800 font-bold uppercase tracking-wider underline border-none bg-transparent cursor-pointer"
+                >
+                  Limpar Datas (Mostrar Todos)
+                </button>
+              </div>
+            )}
+
             {/* Modo de Exportação */}
             <div className="space-y-1.5">
-              <label className="block text-[10px] uppercase font-bold text-gray-500">Formato do PDF resultante</label>
+              <label className="block text-[10px] uppercase font-bold text-gray-500">Formato da Impressão em PDF</label>
               <div className="grid grid-cols-2 gap-2">
                 <button
                   type="button"
@@ -684,7 +813,7 @@ function AppContent() {
                   }`}
                 >
                   <span className="font-bold text-[10px]">Arquivo Único</span>
-                  <span className="text-[8px] font-medium text-gray-400 normal-case">Todos os dias juntos</span>
+                  <span className="text-[8px] font-medium text-gray-400 normal-case">PDF contendo todos os dias em sequência</span>
                 </button>
                 <button
                   type="button"
@@ -696,27 +825,37 @@ function AppContent() {
                   }`}
                 >
                   <span className="font-bold text-[10px]">Arquivos Separados</span>
-                  <span className="text-[8px] font-medium text-gray-400 normal-case">Separado por dia</span>
+                  <span className="text-[8px] font-medium text-gray-400 normal-case">Imprimir cada dia individualmente</span>
                 </button>
               </div>
             </div>
 
             {/* List of reports matching the dates */}
             <div className="bg-slate-50 border border-slate-100 rounded-xl p-3 max-h-40 overflow-y-auto custom-scrollbar">
-              <span className="block text-[9px] uppercase font-bold text-gray-400 tracking-wider mb-2">
-                Diários Selecionados ({batchReportsSelected.length})
-              </span>
+              <div className="flex justify-between items-center mb-2">
+                <span className="text-[9px] uppercase font-bold text-gray-500 tracking-wider">
+                  Diários Selecionados ({batchReportsSelected.length})
+                </span>
+                <span className="text-[9px] text-emerald-700 font-extrabold uppercase">
+                  {currentObra?.nome || "Todas as Obras"}
+                </span>
+              </div>
               {batchReportsSelected.length > 0 ? (
                 <div className="space-y-1">
                   {batchReportsSelected.map((r, i) => (
                     <div key={r.id || r.rdoNo || i} className="flex justify-between items-center text-[10px] text-gray-700 font-mono py-1 border-b border-gray-100 last:border-b-0">
-                      <span className="font-bold text-slate-800">{r.rdoNo}</span>
-                      <span className="text-gray-500">{formatDateString(r.data)}</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-extrabold text-slate-800">RDO {r.rdoNo}</span>
+                        <span className="text-[8px] font-sans px-1.5 py-0.2 rounded bg-slate-200 text-slate-700 font-bold uppercase">
+                          {r.status || "Em Digitação"}
+                        </span>
+                      </div>
+                      <span className="text-gray-500 font-bold">{formatDateString(r.data)}</span>
                     </div>
                   ))}
                 </div>
               ) : (
-                <p className="text-[10px] text-gray-400 italic text-center py-4">Nenhum RDO finalizado encontrado para este período.</p>
+                <p className="text-[10px] text-gray-400 italic text-center py-4">Nenhum RDO encontrado para os critérios selecionados.</p>
               )}
             </div>
 
@@ -724,8 +863,6 @@ function AppContent() {
               <button
                 onClick={() => {
                   setShowBatchPrintConfig(false);
-                  setBatchStartDate("");
-                  setBatchEndDate("");
                 }}
                 className="px-4 py-2 border border-gray-200 text-gray-600 rounded-xl font-bold uppercase tracking-wider hover:bg-slate-50 cursor-pointer"
               >
@@ -740,7 +877,7 @@ function AppContent() {
                 className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl font-bold uppercase tracking-wider flex items-center gap-1.5 cursor-pointer transition-all shadow-sm"
               >
                 <Printer className="w-4 h-4" />
-                Visualizar Lote
+                Visualizar e Imprimir Lote ({batchReportsSelected.length})
               </button>
             </div>
           </div>

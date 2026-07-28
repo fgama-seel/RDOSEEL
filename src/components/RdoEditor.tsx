@@ -41,7 +41,8 @@ import {
   Send,
   LockOpen,
   AlertCircle,
-  Check
+  Check,
+  AlertTriangle
 } from "lucide-react";
 
 interface RdoEditorProps {
@@ -49,7 +50,7 @@ interface RdoEditorProps {
 }
 
 export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
-  const { currentReport, setCurrentReport, saveReport, isFirebase, obras, reports, user, currentObra, isGlobalAdmin } = useRdoStore();
+  const { currentReport, setCurrentReport, saveReport, isFirebase, obras, reports, user, currentObra, isGlobalAdmin, firebaseError } = useRdoStore();
   const [activeTab, setActiveTab] = useState<"geral" | "atividades" | "paralisacoes" | "efetivo" | "equipamentos" | "anexos" | "assinaturas">("geral");
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -124,7 +125,8 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
   const permission = currentObra?.permissoes?.find(p => p?.email?.toLowerCase() === currentUserEmail);
   const accessLevel = isGlobalAdmin ? "owner" : (permission ? permission.access : (currentObra?.userId === user?.uid ? "owner" : "view"));
 
-  const isReadOnly = accessLevel === "view" || (!user && !isFirebase); // If logged out locally, fallback read-only
+  const isQuotaExceeded = Boolean(firebaseError);
+  const isReadOnly = accessLevel === "view" || (!user && !isFirebase) || isQuotaExceeded; // If logged out locally or quota exceeded, fallback read-only
   const isFiscalizacao = accessLevel === "fiscalizacao" || accessLevel === "owner";
   const isFiscalizadora = accessLevel === "gerenciadora" || accessLevel === "owner";
   const isEditor = accessLevel === "edit" || accessLevel === "owner";
@@ -715,6 +717,18 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
 
   return (
     <div className="space-y-6">
+      {isQuotaExceeded && (
+        <div className="bg-amber-100 border border-amber-300 text-amber-950 p-3.5 rounded-xl flex items-center justify-between text-xs font-semibold shadow-2xs">
+          <div className="flex items-center gap-2.5">
+            <AlertTriangle className="w-5 h-5 text-amber-700 shrink-0" />
+            <div>
+              <h4 className="font-extrabold text-amber-950 uppercase tracking-wide text-xs">Edições Travadas por Segurança</h4>
+              <p className="text-[11px] text-amber-900 mt-0.5">O limite de cota do Firebase foi atingido. O Diário está em modo somente leitura para evitar desincronização e perda de dados.</p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Save panel / Banner info */}
       <div className="bg-white rounded-lg border border-slate-200 p-3 flex flex-wrap gap-4 items-center justify-between shadow-xs">
         <div className="flex items-center gap-2.5">

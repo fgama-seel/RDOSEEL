@@ -52,12 +52,12 @@ import {
 import * as XLSX from "xlsx";
 
 export const ConsolidatedReports: React.FC = () => {
-  const { reports, currentObra, user, isGlobalAdmin, saveReport } = useRdoStore();
+  const { reports, currentObra, user, isGlobalAdmin, saveReport, firebaseError } = useRdoStore();
 
   const currentUserEmail = user && 'email' in user ? (user.email?.toLowerCase() || "") : "";
   const permission = currentObra?.permissoes?.find(p => p?.email?.toLowerCase() === currentUserEmail);
   const accessLevel = permission ? permission.access : (currentObra?.userId === user?.uid ? "owner" : "view");
-  const canEditAccess = isGlobalAdmin || (accessLevel !== "view" && accessLevel !== "fiscalizacao" && accessLevel !== "gerenciadora");
+  const canEditAccess = (isGlobalAdmin || (accessLevel !== "view" && accessLevel !== "fiscalizacao" && accessLevel !== "gerenciadora")) && !firebaseError;
 
   // Date Range States
   const [startDate, setStartDate] = useState<string>(() => {
@@ -1038,7 +1038,11 @@ export const ConsolidatedReports: React.FC = () => {
     setLaborHourlyRates(prev => {
       const next = { ...prev, [cargo]: val };
       if (currentObra?.id) {
-        localStorage.setItem(`idle_labor_rates_${currentObra.id}`, JSON.stringify(next));
+        try {
+          localStorage.setItem(`idle_labor_rates_${currentObra.id}`, JSON.stringify(next));
+        } catch (e) {
+          console.warn("Could not save labor rates to localStorage", e);
+        }
       }
       return next;
     });
@@ -1048,7 +1052,11 @@ export const ConsolidatedReports: React.FC = () => {
     setEquipHourlyRates(prev => {
       const next = { ...prev, [equip]: val };
       if (currentObra?.id) {
-        localStorage.setItem(`idle_equip_rates_${currentObra.id}`, JSON.stringify(next));
+        try {
+          localStorage.setItem(`idle_equip_rates_${currentObra.id}`, JSON.stringify(next));
+        } catch (e) {
+          console.warn("Could not save equip rates to localStorage", e);
+        }
       }
       return next;
     });

@@ -15,6 +15,7 @@ import {
   AlertTriangle
 } from "lucide-react";
 import { RdoReport, ObraConfig } from "../types";
+import { useRdoStore } from "../context/RdoContext";
 
 type SignatureRole = "emitente" | "gerenciadora" | "contratante";
 
@@ -37,6 +38,9 @@ export const BatchSignModal: React.FC<BatchSignModalProps> = ({
   accessLevel,
   saveReport
 }) => {
+  const { firebaseError } = useRdoStore();
+  const isQuotaExceeded = Boolean(firebaseError);
+
   if (!isOpen) return null;
 
   // 1. Mode state: "nao_assinados" (to batch sign) vs "assinados" (to batch unsign)
@@ -161,6 +165,11 @@ export const BatchSignModal: React.FC<BatchSignModalProps> = ({
   const executeBatchSign = async () => {
     setToastFeedback(null);
 
+    if (isQuotaExceeded) {
+      setToastFeedback({ type: "warning", msg: "Edições travadas: O limite de cota do Firebase foi excedido." });
+      return;
+    }
+
     if (selectedIds.length === 0) {
       setToastFeedback({ type: "warning", msg: "Por favor, selecione ao menos um RDO na lista para assinar." });
       return;
@@ -254,6 +263,11 @@ export const BatchSignModal: React.FC<BatchSignModalProps> = ({
   // Action: Execute Batch Unsign / Remove Signature
   const executeBatchUnsign = async () => {
     setToastFeedback(null);
+
+    if (isQuotaExceeded) {
+      setToastFeedback({ type: "warning", msg: "Edições travadas: O limite de cota do Firebase foi excedido." });
+      return;
+    }
 
     if (selectedIds.length === 0) {
       setToastFeedback({ type: "warning", msg: "Por favor, selecione ao menos um RDO na lista para remover a assinatura." });

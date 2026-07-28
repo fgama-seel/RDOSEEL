@@ -71,6 +71,8 @@ interface RdoContextType {
   isGlobalAdmin: boolean;
   logAction: (action: string, details: string) => Promise<void>;
   getAuditLogs: () => Promise<AuditLog[]>;
+  firebaseError: string | null;
+  clearFirebaseError: () => void;
 }
 
 const RdoContext = createContext<RdoContextType | undefined>(undefined);
@@ -78,7 +80,45 @@ const RdoContext = createContext<RdoContextType | undefined>(undefined);
 const LOCAL_REPORTS_KEY = "rdo_reports_local";
 const LOCAL_USER_KEY = "rdo_user_local";
 
-const GLOBAL_ADMINS = ["adm@adm.com", "dev@seel.com.br"];
+const GLOBAL_ADMINS = ["adm@adm.com", "dev@seel.com.br", "fgama@seel.com.br"];
+
+const safeSetLocalStorage = (key: string, value: any) => {
+  try {
+    const stringified = typeof value === "string" ? value : JSON.stringify(value);
+    localStorage.setItem(key, stringified);
+  } catch (err: any) {
+    console.warn(`localStorage quota exceeded for key '${key}', applying fallback optimization...`, err);
+    if (Array.isArray(value)) {
+      try {
+        const slice = value.slice(0, 25);
+        localStorage.setItem(key, JSON.stringify(slice));
+      } catch (err2) {
+        try {
+          const stripped = value.slice(0, 15).map((item: any) => {
+            if (!item || typeof item !== "object") return item;
+            return {
+              ...item,
+              fotos: item.fotos?.map((f: any) => ({
+                ...f,
+                url: typeof f?.url === "string" && f.url.startsWith("data:") ? "" : f?.url
+              })),
+              anexos: item.anexos?.map((a: any) => ({
+                ...a,
+                url: typeof a?.url === "string" && a.url.startsWith("data:") ? "" : a?.url
+              })),
+              emitenteAssinaturaImg: typeof item.emitenteAssinaturaImg === "string" && item.emitenteAssinaturaImg.startsWith("data:") ? "" : item.emitenteAssinaturaImg,
+              gerenciadoraAssinaturaImg: typeof item.gerenciadoraAssinaturaImg === "string" && item.gerenciadoraAssinaturaImg.startsWith("data:") ? "" : item.gerenciadoraAssinaturaImg,
+              contratanteAssinaturaImg: typeof item.contratanteAssinaturaImg === "string" && item.contratanteAssinaturaImg.startsWith("data:") ? "" : item.contratanteAssinaturaImg,
+            };
+          });
+          localStorage.setItem(key, JSON.stringify(stripped));
+        } catch (err3) {
+          console.error("Critical: Storage quota exceeded even after stripping large assets.", err3);
+        }
+      }
+    }
+  }
+};
 
 const DEFAULT_OBRAS: ObraConfig[] = [
   {
@@ -115,6 +155,9 @@ export const RdoProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [obras, setObras] = useState<ObraConfig[]>([]);
   const [currentObra, setCurrentObra] = useState<ObraConfig | null>(null);
   const [isObrasLoading, setIsObrasLoading] = useState(false);
+  const [firebaseError, setFirebaseError] = useState<string | null>(null);
+
+  const clearFirebaseError = () => setFirebaseError(null);
   
   const isGlobalAdmin = user?.email ? GLOBAL_ADMINS.includes(user.email.toLowerCase()) : false;
 
@@ -123,7 +166,7 @@ export const RdoProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   });
 
   const setIsLocalFallback = (fallback: boolean) => {
-    localStorage.setItem("rdo_use_local_mode", fallback ? "true" : "false");
+    safeSetLocalStorage("rdo_use_local_mode", fallback ? "true" : "false");
     setUseLocalFallbackState(fallback);
   };
 
@@ -171,45 +214,19 @@ export const RdoProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         try {
           const loadedMap: Record<string, ObraConfig> = {};
 
-          if (isGlobalAdmin) {
-            // Fetch ALL Obras
-            const qAll = query(collection(db, "obras"));
-            const snapAll = await getDocs(qAll);
-            snapAll.forEach((docSnap) => {
-              loadedMap[docSnap.id] = { id: docSnap.id, ...docSnap.data() } as ObraConfig;
-            });
-          } else {
-            // Fetch Obras created by me
-            const qOwn = query(collection(db, "obras"), where("userId", "==", user.uid));
-            const snapOwn = await getDocs(qOwn);
-            
-            snapOwn.forEach((docSnap) => {
-              loadedMap[docSnap.id] = { id: docSnap.id, ...docSnap.data() } as ObraConfig;
-            });
+          // Fetch ALL Obras from Firestore
+          const qAll = query(collection(db, "obras"));
+          const snapAll = await getDocs(qAll);
+          snapAll.forEach((docSnap) => {
+            loadedMap[docSnap.id] = { id: docSnap.id, ...docSnap.data() } as ObraConfig;
+          });
 
-            // Fetch Obras shared with my email
-            if (user.email) {
-              const userEmailLower = user.email.toLowerCase();
-              const qShared = query(
-                collection(db, "obras"), 
-                where("permissoesEmails", "array-contains", userEmailLower)
-              );
-              const snapShared = await getDocs(qShared);
-              snapShared.forEach((docSnap) => {
-                loadedMap[docSnap.id] = { id: docSnap.id, ...docSnap.data() } as ObraConfig;
-              });
-            }
-          }
+          let loaded = Object.values(loadedMap);
 
-          const loaded = Object.values(loadedMap);
-          setObras(loaded);
-          if (loaded.length > 0) {
-            const storedCurrentId = localStorage.getItem("rdo_current_obra_id");
-            const found = loaded.find(o => o.id === storedCurrentId);
-            setCurrentObra(found || loaded[0]);
-          } else {
+          if (loaded.length === 0) {
             // Seed a default obra for the user in Firebase if they have none
-            const defaultSeeded = {
+            const defaultSeeded: ObraConfig = {
+              id: "obra-saneamento-leste",
               userId: user.uid,
               nome: "SANEAMENTO LESTE",
               numeroContrato: "CT-2015/09",
@@ -231,14 +248,21 @@ export const RdoProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               ],
               createdAt: new Date().toISOString()
             };
-            const colRef = collection(db, "obras");
-            const docRef = await addDoc(colRef, defaultSeeded);
-            const savedObra = { id: docRef.id, ...defaultSeeded } as ObraConfig;
-            setObras([savedObra]);
-            setCurrentObra(savedObra);
+            const docRef = doc(db, "obras", "obra-saneamento-leste");
+            await setDoc(docRef, defaultSeeded);
+            loaded = [defaultSeeded];
           }
-        } catch (error) {
+
+          setObras(loaded);
+          localStorage.setItem("rdo_obras_local", JSON.stringify(loaded));
+          const storedCurrentId = localStorage.getItem("rdo_current_obra_id");
+          const found = loaded.find(o => o.id === storedCurrentId);
+          setCurrentObra(found || loaded[0]);
+        } catch (error: any) {
           console.error("Firebase fetch Obras failed, falling back to local:", error);
+          if (error?.message?.toLowerCase().includes("quota") || error?.code?.includes("resource-exhausted")) {
+            setFirebaseError("O limite diário de leituras do Firebase (Quota Exceeded) foi atingido. O aplicativo alternou para os dados salvos em modo Local para garantir continuidade.");
+          }
           loadLocalObras();
         } finally {
           setIsObrasLoading(false);
@@ -294,7 +318,7 @@ export const RdoProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setCurrentObra(DEFAULT_OBRAS[0]);
       }
     } else {
-      localStorage.setItem("rdo_obras_local", JSON.stringify(DEFAULT_OBRAS));
+      safeSetLocalStorage("rdo_obras_local", DEFAULT_OBRAS);
       setObras(DEFAULT_OBRAS);
       setCurrentObra(DEFAULT_OBRAS[0]);
     }
@@ -302,7 +326,7 @@ export const RdoProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   useEffect(() => {
     if (currentObra?.id) {
-      localStorage.setItem("rdo_current_obra_id", currentObra.id);
+      safeSetLocalStorage("rdo_current_obra_id", currentObra.id);
     }
   }, [currentObra]);
 
@@ -321,15 +345,11 @@ export const RdoProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setIsReportsLoading(true);
         const path = "rdos";
         try {
-          const q = query(
-            collection(db, path),
-            where("obraId", "==", currentObra.id)
-          );
-          const snapshot = await getDocs(q);
-          const loaded: RdoReport[] = [];
-          snapshot.forEach((docSnap) => {
+          const snapAll = await getDocs(collection(db, path));
+          const allLoaded: RdoReport[] = [];
+          snapAll.forEach((docSnap) => {
             const rData = docSnap.data();
-            loaded.push({ 
+            allLoaded.push({ 
               id: docSnap.id, 
               ...rData,
               obraId: rData.obraId || "obra-saneamento-leste",
@@ -337,20 +357,49 @@ export const RdoProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             } as RdoReport);
           });
           
-          loaded.sort((a, b) => b.data.localeCompare(a.data));
+          let filtered = allLoaded.filter(r => 
+            r.obraId === currentObra.id || 
+            r.obra === currentObra.nome || 
+            (!r.obraId && currentObra.id === "obra-saneamento-leste")
+          );
+
+          // If Firestore rdos collection is empty, seed default sample reports to Firebase
+          if (allLoaded.length === 0) {
+            const seededReports: RdoReport[] = [];
+            for (const defR of DEFAULT_REPORTS) {
+              const cleaned = {
+                ...defR,
+                obraId: currentObra.id,
+                userId: user.uid,
+                createdAt: new Date().toISOString()
+              };
+              const docRef = doc(db, path, defR.id);
+              await setDoc(docRef, cleaned);
+              seededReports.push(cleaned);
+            }
+            filtered = seededReports;
+          }
+
+          // Sync cache in localStorage safely
+          safeSetLocalStorage(LOCAL_REPORTS_KEY, allLoaded);
+
+          filtered.sort((a, b) => (b.data || "").localeCompare(a.data || ""));
           
-          setReports(loaded);
-          if (loaded.length > 0) {
+          setReports(filtered);
+          if (filtered.length > 0) {
              const storedCurrentRdoId = localStorage.getItem("rdo_current_report_id");
-             const found = loaded.find(r => r.id === storedCurrentRdoId);
-             setCurrentReport(found || loaded[0]);
+             const found = filtered.find(r => r.id === storedCurrentRdoId);
+             setCurrentReport(found || filtered[0]);
           } else {
              setCurrentReport(null);
           }
-        } catch (error) {
+        } catch (error: any) {
           console.error("Firebase fetch failed, falling back to local:", error);
+          const isQuota = error?.message?.toLowerCase().includes("quota") || error?.code?.includes("resource-exhausted");
+          if (isQuota) {
+            setFirebaseError("O limite diário de leituras do Firebase Firestore (Spark 50.000 leituras/dia) foi atingido. O sistema ativou a cópia Local dos RDOs para não interromper seu trabalho.");
+          }
           loadLocalReports();
-          handleFirestoreError(error, OperationType.LIST, path);
         } finally {
           setIsReportsLoading(false);
         }
@@ -371,9 +420,24 @@ export const RdoProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           obraId: r.obraId || "obra-saneamento-leste",
           status: r.status || "Em Digitação"
         }));
-        setReports(updated);
-        if (updated.length > 0) {
-          setCurrentReport(updated[0]);
+        
+        let filtered = updated;
+        if (currentObra) {
+          filtered = updated.filter(r => 
+            r.obraId === currentObra.id || 
+            r.obra === currentObra.nome || 
+            (!r.obraId && currentObra.id === "obra-saneamento-leste")
+          );
+        }
+
+        filtered.sort((a, b) => (b.data || "").localeCompare(a.data || ""));
+        setReports(filtered);
+        if (filtered.length > 0) {
+          const storedCurrentRdoId = localStorage.getItem("rdo_current_report_id");
+          const found = filtered.find(r => r.id === storedCurrentRdoId);
+          setCurrentReport(found || filtered[0]);
+        } else {
+          setCurrentReport(null);
         }
       } catch {
         const seeded = DEFAULT_REPORTS.map(r => ({ ...r, obraId: "obra-saneamento-leste", status: "Em Digitação" as const }));
@@ -382,7 +446,7 @@ export const RdoProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     } else {
       const seeded = DEFAULT_REPORTS.map(r => ({ ...r, obraId: "obra-saneamento-leste", status: "Em Digitação" as const }));
-      localStorage.setItem(LOCAL_REPORTS_KEY, JSON.stringify(seeded));
+      safeSetLocalStorage(LOCAL_REPORTS_KEY, seeded);
       setReports(seeded);
       setCurrentReport(seeded[0]);
     }
@@ -395,7 +459,7 @@ export const RdoProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } else {
       // Local Mock Login
       const mockUser = { uid: "demo-user", email };
-      localStorage.setItem(LOCAL_USER_KEY, JSON.stringify(mockUser));
+      safeSetLocalStorage(LOCAL_USER_KEY, mockUser);
       setUser(mockUser);
     }
   };
@@ -406,7 +470,7 @@ export const RdoProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } else {
       // Local Mock Signup
       const mockUser = { uid: "demo-user", email };
-      localStorage.setItem(LOCAL_USER_KEY, JSON.stringify(mockUser));
+      safeSetLocalStorage(LOCAL_USER_KEY, mockUser);
       setUser(mockUser);
     }
   };
@@ -418,7 +482,7 @@ export const RdoProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } else {
       // Local Mock Google Login
       const mockUser = { uid: "demo-user-google", email: "google-user@seel.com.br" };
-      localStorage.setItem(LOCAL_USER_KEY, JSON.stringify(mockUser));
+      safeSetLocalStorage(LOCAL_USER_KEY, mockUser);
       setUser(mockUser);
     }
   };
@@ -476,6 +540,19 @@ export const RdoProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     }
 
+    // Always update local cache array safely
+    let localUpdatedList: RdoReport[] = [];
+    if (reportToSave.id) {
+      localUpdatedList = reports.map(r => r.id === reportToSave.id ? reportToSave : r);
+    } else {
+      if (!reportToSave.id) {
+        reportToSave.id = "rdo-" + Math.random().toString(36).substr(2, 9);
+      }
+      reportToSave.createdAt = new Date().toISOString();
+      localUpdatedList = [reportToSave, ...reports];
+    }
+    safeSetLocalStorage(LOCAL_REPORTS_KEY, localUpdatedList);
+
     if (activeIsFirebase && db) {
       const path = "rdos";
       try {
@@ -495,22 +572,18 @@ export const RdoProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
         setCurrentReport(reportToSave);
         await logAction(logActionType, logMessage);
-      } catch (error) {
-        handleFirestoreError(error, OperationType.WRITE, path);
+      } catch (error: any) {
+        console.error("Erro no salvamento do Firebase, mantendo salvo em LocalStorage:", error);
+        const isQuota = error?.message?.toLowerCase().includes("quota") || error?.code?.includes("resource-exhausted");
+        if (isQuota) {
+          setFirebaseError("O limite de operações do Firebase foi atingido. Seu RDO foi salvo com sucesso no armazenamento local do navegador.");
+        }
+        setReports(localUpdatedList);
+        setCurrentReport(reportToSave);
       }
     } else {
       // Local Save
-      let updatedReports: RdoReport[] = [];
-      if (reportToSave.id) {
-        updatedReports = reports.map(r => r.id === reportToSave.id ? reportToSave : r);
-      } else {
-        reportToSave.id = "rdo-" + Math.random().toString(36).substr(2, 9);
-        reportToSave.createdAt = new Date().toISOString();
-        updatedReports = [reportToSave, ...reports];
-      }
-      
-      localStorage.setItem(LOCAL_REPORTS_KEY, JSON.stringify(updatedReports));
-      setReports(updatedReports);
+      setReports(localUpdatedList);
       setCurrentReport(reportToSave);
     }
   };
@@ -542,7 +615,7 @@ export const RdoProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } else {
       // Local Delete
       const updatedReports = reports.filter(r => r.id !== id);
-      localStorage.setItem(LOCAL_REPORTS_KEY, JSON.stringify(updatedReports));
+      safeSetLocalStorage(LOCAL_REPORTS_KEY, updatedReports);
       setReports(updatedReports);
       if (currentReport?.id === id) {
         setCurrentReport(updatedReports.length > 0 ? updatedReports[0] : null);
@@ -1006,7 +1079,7 @@ export const RdoProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           console.error("Erro ao atualizar RDOs não assinados no Firestore:", err);
         }
       } else {
-        localStorage.setItem(LOCAL_REPORTS_KEY, JSON.stringify(updatedReportsList));
+        safeSetLocalStorage(LOCAL_REPORTS_KEY, updatedReportsList);
       }
     }
 
@@ -1055,7 +1128,7 @@ export const RdoProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         obraToSave.id = generatedId;
       }
       
-      localStorage.setItem("rdo_obras_local", JSON.stringify(updatedObras));
+      safeSetLocalStorage("rdo_obras_local", updatedObras);
       setObras(updatedObras);
       const savedRef = updatedObras.find(o => o.id === obraToSave.id) || obraToSave;
       setCurrentObra(savedRef);
@@ -1086,7 +1159,7 @@ export const RdoProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     } else {
       const updatedObras = obras.filter(o => o.id !== id);
-      localStorage.setItem("rdo_obras_local", JSON.stringify(updatedObras));
+      safeSetLocalStorage("rdo_obras_local", updatedObras);
       setObras(updatedObras);
       if (currentObra?.id === id) {
         setCurrentObra(updatedObras.length > 0 ? updatedObras[0] : null);
@@ -1129,7 +1202,9 @@ export const RdoProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // Admin
       isGlobalAdmin,
       logAction,
-      getAuditLogs
+      getAuditLogs,
+      firebaseError,
+      clearFirebaseError
     }}>
       {children}
     </RdoContext.Provider>

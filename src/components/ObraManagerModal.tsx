@@ -26,7 +26,8 @@ interface ObraManagerModalProps {
 }
 
 export const ObraManagerModal: React.FC<ObraManagerModalProps> = ({ isOpen, onClose }) => {
-  const { obras, saveObra, deleteObra, currentObra, setCurrentObra, user } = useRdoStore();
+  const { obras, saveObra, deleteObra, currentObra, setCurrentObra, user, firebaseError } = useRdoStore();
+  const isQuotaExceeded = Boolean(firebaseError);
 
   const [selectedObraId, setSelectedObraId] = useState<string>("");
   const [nome, setNome] = useState("");
@@ -403,6 +404,10 @@ export const ObraManagerModal: React.FC<ObraManagerModalProps> = ({ isOpen, onCl
 
   // Save the full Obra details
   const handleSaveObraConfig = async () => {
+    if (isQuotaExceeded) {
+      setMessage({ text: "Edições travadas: O limite de cota do Firebase foi excedido.", type: "error" });
+      return;
+    }
     if (!nome.trim() || !cliente.trim() || !contratada.trim() || !gerenciadora.trim()) {
       setMessage({ text: "Nome da Obra, Cliente, Contratada (SEEL) e Gerenciadora são campos obrigatórios.", type: "error" });
       return;
