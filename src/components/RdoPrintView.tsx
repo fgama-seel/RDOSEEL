@@ -929,7 +929,7 @@ const SingleReportPrint: React.FC<{ report: RdoReport }> = ({ report }) => {
       const totalA = group.items.reduce((sum, item) => sum + (item.a || 0), 0);
       const totalT = group.items.reduce((sum, item) => sum + (item.t || 0), 0);
 
-      const itemChunks = chunkArray(group.items, 12);
+      const itemChunks = chunkArray(group.items, 30);
       itemChunks.forEach((chk, cIdx) => {
         subGroups.push({
           id: `${group.id}-part-${cIdx}`,
@@ -947,13 +947,13 @@ const SingleReportPrint: React.FC<{ report: RdoReport }> = ({ report }) => {
       });
     });
 
-    // Group subGroups into page chunks where total items <= 14 per page
+    // Group subGroups into page chunks where total items <= 30 per page
     const efetivoPageChunks: EfetivoSubGroup[][] = [];
     let currentEfChunk: EfetivoSubGroup[] = [];
     let currentEfItemCount = 0;
 
     subGroups.forEach((sg) => {
-      if (currentEfChunk.length > 0 && (currentEfItemCount + sg.items.length > 14)) {
+      if (currentEfChunk.length > 0 && (currentEfItemCount + sg.items.length > 30)) {
         efetivoPageChunks.push(currentEfChunk);
         currentEfChunk = [sg];
         currentEfItemCount = sg.items.length;
