@@ -949,62 +949,7 @@ const SingleReportPrint: React.FC<{ report: RdoReport }> = ({ report }) => {
     </div>
   );
 
-  // DEDICATED HIGH-RES PHOTO GALLERY PAGES FOR ACTIVITY IMAGES
-  const allActivityPhotos: { actIndex: number; actDesc: string; imgUrl: string; imgIndex: number }[] = [];
-  if (report.atividades && report.atividades.length > 0) {
-    report.atividades.forEach((act, aIdx) => {
-      if (act.imagens && act.imagens.length > 0) {
-        act.imagens.forEach((imgUrl, iIdx) => {
-          allActivityPhotos.push({
-            actIndex: aIdx + 1,
-            actDesc: act.descricao || act.local || `Atividade #${aIdx + 1}`,
-            imgUrl,
-            imgIndex: iIdx + 1,
-          });
-        });
-      }
-    });
-  }
 
-  if (allActivityPhotos.length > 0) {
-    const photoChunks = Array.from(
-      { length: Math.ceil(allActivityPhotos.length / 4) },
-      (_, i) => allActivityPhotos.slice(i * 4, i * 4 + 4)
-    );
-
-    photoChunks.forEach((chunk, pageIdx) => {
-      pages.push(
-        <div key={`activity-photos-${pageIdx}`} className="flex flex-col gap-3 text-[8.5px]">
-          <h4 className="text-[9px] font-bold bg-[#004899] text-white py-0.5 px-2 uppercase tracking-wide flex justify-between">
-            <span>REGISTRO FOTOGRÁFICO DE ATIVIDADES — PARTE {pageIdx + 1} DE {photoChunks.length}</span>
-            <span className="font-mono text-[8px] font-normal">Total: {allActivityPhotos.length} foto(s)</span>
-          </h4>
-
-          <div className="grid grid-cols-2 gap-3.5">
-            {chunk.map((photo, pIdx) => (
-              <div key={pIdx} className="border border-gray-300 rounded p-2 bg-white flex flex-col items-center shadow-2xs">
-                <div className="w-full h-[310px] flex items-center justify-center bg-gray-50 rounded border border-gray-200 overflow-hidden">
-                  <img
-                    src={photo.imgUrl}
-                    alt={photo.actDesc}
-                    className="max-h-[310px] max-w-full object-contain"
-                  />
-                </div>
-                <div className="w-full mt-2 text-center">
-                  <span className="text-[8px] font-bold text-[#004899] block uppercase tracking-wide">
-                    Atividade #{photo.actIndex} — Foto {photo.imgIndex}
-                  </span>
-                  <p className="text-[7.5px] text-gray-700 font-medium line-clamp-2 mt-0.5 font-sans leading-tight">
-                    {photo.actDesc}
-                  </p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      );
-    });
-  }
 
   // PAGE FOR COMMENTS (IF APPLICABLE)
   if ((report.comentariosGerenciadoraContratante && report.comentariosGerenciadoraContratante.length > 0) || (report.comentariosContratada && report.comentariosContratada.length > 0)) {
