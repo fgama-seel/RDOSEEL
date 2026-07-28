@@ -41,8 +41,6 @@ export const BatchSignModal: React.FC<BatchSignModalProps> = ({
   const { firebaseError } = useRdoStore();
   const isQuotaExceeded = Boolean(firebaseError);
 
-  if (!isOpen) return null;
-
   // 1. Mode state: "nao_assinados" (to batch sign) vs "assinados" (to batch unsign)
   const [filterMode, setFilterMode] = useState<"nao_assinados" | "assinados">("nao_assinados");
 
@@ -135,6 +133,8 @@ export const BatchSignModal: React.FC<BatchSignModalProps> = ({
   React.useEffect(() => {
     setSelectedIds([]);
   }, [filterMode, selectedRole, startDate, endDate, searchQuery]);
+
+  if (!isOpen) return null;
 
   // Select all / Deselect all
   const isAllSelected = displayedReports.length > 0 && selectedIds.length === displayedReports.length;
