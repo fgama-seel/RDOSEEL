@@ -440,7 +440,21 @@ const SingleReportPrint: React.FC<{ report: RdoReport }> = ({ report }) => {
   const pages: React.ReactNode[] = [];
 
   // PAGE 1: DADOS GERAIS, RESUMOS E PRIMEIRAS ATIVIDADES
-  const firstActivitiesBatch = report.atividades ? report.atividades.slice(0, 2) : [];
+  const allActivities = report.atividades || [];
+  let firstBatchCount = 0;
+  if (allActivities.length > 0) {
+    const act0HasImgs = Boolean(allActivities[0]?.imagens && allActivities[0].imagens.length > 0);
+    if (act0HasImgs) {
+      firstBatchCount = 1;
+    } else if (allActivities.length > 1) {
+      const act1HasImgs = Boolean(allActivities[1]?.imagens && allActivities[1].imagens.length > 0);
+      firstBatchCount = act1HasImgs ? 1 : 2;
+    } else {
+      firstBatchCount = 1;
+    }
+  }
+  const firstActivitiesBatch = allActivities.slice(0, firstBatchCount);
+  const remainingActivities = allActivities.slice(firstBatchCount);
 
   pages.push(
     <div key="page-1" className="flex flex-col gap-2.5 text-[8.5px]">
@@ -552,7 +566,7 @@ const SingleReportPrint: React.FC<{ report: RdoReport }> = ({ report }) => {
         </div>
       </div>
 
-      {/* ATIVIDADES EXECUTADAS (PRIMEIRO BLOCO: ATÉ 2 ATIVIDADES) */}
+      {/* ATIVIDADES EXECUTADAS (PRIMEIRO BLOCO) */}
       <div className="mt-1">
         <h3 className="text-[9px] font-bold bg-[#004899] text-white py-0.5 px-2 uppercase tracking-wide">
           ATIVIDADES EXECUTADAS NO PERÍODO — FASES DE CAMPO
@@ -572,16 +586,36 @@ const SingleReportPrint: React.FC<{ report: RdoReport }> = ({ report }) => {
   );
 
   // PAGE CONTINUATION FOR REMAINING ATIVIDADES & FATOS RELEVANTES
-  const remainingActivities = report.atividades ? report.atividades.slice(2) : [];
   if (remainingActivities.length > 0 || (report.fatosRelevantes && report.fatosRelevantes.length > 0)) {
-    // Chunk remaining activities in groups of 3
-    const activityChunks = remainingActivities.length > 0
-      ? Array.from({ length: Math.ceil(remainingActivities.length / 3) }, (_, i) => remainingActivities.slice(i * 3, i * 3 + 3))
-      : [];
+    // Dynamic chunking based on activity card height estimation
+    const activityChunks: Activity[][] = [];
+    let currentActChunk: Activity[] = [];
+    let currentChunkHeight = 0;
+
+    remainingActivities.forEach((act) => {
+      const hasImgs = Boolean(act.imagens && act.imagens.length > 0);
+      const estimatedHeight = hasImgs ? 320 : 120;
+
+      if (currentActChunk.length > 0 && (currentChunkHeight + estimatedHeight > 620)) {
+        activityChunks.push(currentActChunk);
+        currentActChunk = [act];
+        currentChunkHeight = estimatedHeight;
+      } else {
+        currentActChunk.push(act);
+        currentChunkHeight += estimatedHeight;
+      }
+    });
+    if (currentActChunk.length > 0) {
+      activityChunks.push(currentActChunk);
+    }
+
+    let globalActIndexCounter = firstBatchCount;
 
     if (activityChunks.length > 0) {
       activityChunks.forEach((chunk, chunkIdx) => {
-        const startNum = 2 + (chunkIdx * 3);
+        const startNum = globalActIndexCounter;
+        globalActIndexCounter += chunk.length;
+
         pages.push(
           <div key={`atividades-cont-${chunkIdx}`} className="flex flex-col gap-3 text-[8.5px]">
             <div>
@@ -652,10 +686,31 @@ const SingleReportPrint: React.FC<{ report: RdoReport }> = ({ report }) => {
           ? [{ id: 'f-init-' + catKey, nome: row.frentes }]
           : [];
 
-      // Chunk frentes in groups of 2 if frentesList > 2 to guarantee everything fits without overflow
-      const frentesChunks = frentesList.length > 2
-        ? Array.from({ length: Math.ceil(frentesList.length / 2) }, (_, i) => frentesList.slice(i * 2, i * 2 + 2))
-        : [frentesList];
+      // Smart chunking based on total table items (labor + equip) per frente
+      const frentesChunks: (typeof frentesList)[] = [];
+      let currentFrChunk: typeof frentesList = [];
+      let currentFrItemCount = 0;
+
+      frentesList.forEach((f) => {
+        const laborCount = f.maoDeObraDescs?.length || 0;
+        const equipCount = f.equipamentoDescs?.length || 0;
+        const totalItems = Math.max(1, laborCount + equipCount);
+
+        if (currentFrChunk.length > 0 && (currentFrItemCount + totalItems > 10)) {
+          frentesChunks.push(currentFrChunk);
+          currentFrChunk = [f];
+          currentFrItemCount = totalItems;
+        } else {
+          currentFrChunk.push(f);
+          currentFrItemCount += totalItems;
+        }
+      });
+      if (currentFrChunk.length > 0) {
+        frentesChunks.push(currentFrChunk);
+      }
+      if (frentesChunks.length === 0) {
+        frentesChunks.push([]);
+      }
 
       frentesChunks.forEach((frenteChunk, chunkIdx) => {
         pages.push(
@@ -836,31 +891,114 @@ const SingleReportPrint: React.FC<{ report: RdoReport }> = ({ report }) => {
     </div>
   );
 
-  // PAGE FOR EFETIVO & EQUIPAMENTOS MOBILIZADOS
-  pages.push(
-    <div key="page-efetivo-equip" className="flex flex-col gap-3 text-[8.5px]">
-      {/* EFETIVO - QUADRO DETALHADO */}
-      <div>
-        <h4 className="text-[9px] font-bold bg-[#004899] text-white py-0.5 px-2 uppercase tracking-wide">
-          EFETIVO - QUADRO DETALHADO DO PESSOAL DE CAMPO
-        </h4>
-        <p className="text-[6.5px] text-gray-400 italic mb-1 uppercase tracking-tight">Legenda: C - Cadastrados em Folha; F - Faltas no dia; A - Atestados Médicos; T - Total Geral Presente</p>
+  // PAGE FOR EFETIVO & EQUIPAMENTOS MOBILIZADOS (INTELLIGENTLY CHUNKED TO PREVENT OVERFLOW)
+  const efetivoGroups = report.efetivoDetalhado || [];
+  const equipItemsAll = report.equipamentosDetalhado || [];
 
-        <div className="space-y-2 border border-gray-300 p-1 bg-gray-50/50">
-          {report.efetivoDetalhado && report.efetivoDetalhado.length > 0 ? (
-            report.efetivoDetalhado.map((group) => {
-              const totalC = group.items.reduce((sum, item) => sum + (item.c || 0), 0);
-              const totalF = group.items.reduce((sum, item) => sum + (item.f || 0), 0);
-              const totalA = group.items.reduce((sum, item) => sum + (item.a || 0), 0);
-              const totalT = group.items.reduce((sum, item) => sum + (item.t || 0), 0);
+  // Helper to chunk an array
+  function chunkArray<T>(arr: T[], size: number): T[][] {
+    return Array.from({ length: Math.ceil(arr.length / size) }, (_, i) =>
+      arr.slice(i * size, i * size + size)
+    );
+  }
 
-              return (
-                <div key={group.id} className="bg-white border border-gray-200">
+  // 1. Process Efetivo Groups into page blocks
+  let hasMergedEquip = false;
+
+  if (efetivoGroups.length > 0) {
+    // Process each group, breaking large item lists into sub-chunks of max 12 items
+    type EfetivoSubGroup = {
+      id: string;
+      groupName: string;
+      items: typeof efetivoGroups[0]['items'];
+      isFirstPart: boolean;
+      isLastPart: boolean;
+      totalC: number;
+      totalF: number;
+      totalA: number;
+      totalT: number;
+      partIndex: number;
+      totalParts: number;
+    };
+
+    const subGroups: EfetivoSubGroup[] = [];
+
+    efetivoGroups.forEach((group) => {
+      const totalC = group.items.reduce((sum, item) => sum + (item.c || 0), 0);
+      const totalF = group.items.reduce((sum, item) => sum + (item.f || 0), 0);
+      const totalA = group.items.reduce((sum, item) => sum + (item.a || 0), 0);
+      const totalT = group.items.reduce((sum, item) => sum + (item.t || 0), 0);
+
+      const itemChunks = chunkArray(group.items, 12);
+      itemChunks.forEach((chk, cIdx) => {
+        subGroups.push({
+          id: `${group.id}-part-${cIdx}`,
+          groupName: group.nome,
+          items: chk,
+          isFirstPart: cIdx === 0,
+          isLastPart: cIdx === itemChunks.length - 1,
+          totalC,
+          totalF,
+          totalA,
+          totalT,
+          partIndex: cIdx + 1,
+          totalParts: itemChunks.length,
+        });
+      });
+    });
+
+    // Group subGroups into page chunks where total items <= 14 per page
+    const efetivoPageChunks: EfetivoSubGroup[][] = [];
+    let currentEfChunk: EfetivoSubGroup[] = [];
+    let currentEfItemCount = 0;
+
+    subGroups.forEach((sg) => {
+      if (currentEfChunk.length > 0 && (currentEfItemCount + sg.items.length > 14)) {
+        efetivoPageChunks.push(currentEfChunk);
+        currentEfChunk = [sg];
+        currentEfItemCount = sg.items.length;
+      } else {
+        currentEfChunk.push(sg);
+        currentEfItemCount += sg.items.length;
+      }
+    });
+    if (currentEfChunk.length > 0) {
+      efetivoPageChunks.push(currentEfChunk);
+    }
+
+    // Render Efetivo pages
+    efetivoPageChunks.forEach((efChunk, pIdx) => {
+      const totalPageItems = efChunk.reduce((sum, sg) => sum + sg.items.length, 0);
+      const isLastEfetivoPage = pIdx === efetivoPageChunks.length - 1;
+
+      // Check if we can fit small Equipamentos table on this last Efetivo page
+      const canIncludeEquip = isLastEfetivoPage && equipItemsAll.length > 0 && totalPageItems <= 6 && equipItemsAll.length <= 6;
+      if (canIncludeEquip) {
+        hasMergedEquip = true;
+      }
+
+      pages.push(
+        <div key={`page-efetivo-${pIdx}`} className="flex flex-col gap-3 text-[8.5px]">
+          {/* EFETIVO - QUADRO DETALHADO */}
+          <div>
+            <h4 className="text-[9px] font-bold bg-[#004899] text-white py-0.5 px-2 uppercase tracking-wide flex justify-between items-center">
+              <span>EFETIVO — QUADRO DETALHADO DO PESSOAL DE CAMPO {efetivoPageChunks.length > 1 ? `(PARTE ${pIdx + 1} DE ${efetivoPageChunks.length})` : ''}</span>
+              <span className="text-[7.5px] font-normal font-mono">Página {pIdx + 1}</span>
+            </h4>
+            <p className="text-[6.5px] text-gray-400 italic mb-1 uppercase tracking-tight">
+              Legenda: C - Cadastrados em Folha; F - Faltas no dia; A - Atestados Médicos; T - Total Geral Presente
+            </p>
+
+            <div className="space-y-2 border border-gray-300 p-1 bg-gray-50/50">
+              {efChunk.map((sg) => (
+                <div key={sg.id} className="bg-white border border-gray-200">
                   <div className="bg-[#004899]/10 p-1 flex justify-between font-bold text-xs text-[#004899]">
-                    <span>{group.nome}</span>
+                    <span>
+                      {sg.groupName} {sg.totalParts > 1 ? `(Item ${sg.items[0]?.id ? '' : ''}${sg.partIndex}/${sg.totalParts})` : ''}
+                    </span>
                     <span className="text-[8px] bg-[#004899] text-white px-1 py-0.5 rounded uppercase">Grupo de Efetivo</span>
                   </div>
-                  
+
                   <table className="w-full text-left font-sans text-[8px] border-collapse">
                     <thead>
                       <tr className="bg-gray-100 border-b border-gray-200 text-gray-500 font-semibold">
@@ -873,7 +1011,7 @@ const SingleReportPrint: React.FC<{ report: RdoReport }> = ({ report }) => {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
-                      {group.items.map((item) => (
+                      {sg.items.map((item) => (
                         <tr key={item.id} className="hover:bg-slate-50">
                           <td className="p-1 border-r border-gray-200 font-medium text-gray-800">{item.cargo}</td>
                           <td className="p-1 border-r border-gray-200 text-center font-mono text-gray-500">{item.moiMod}</td>
@@ -883,71 +1021,125 @@ const SingleReportPrint: React.FC<{ report: RdoReport }> = ({ report }) => {
                           <td className="p-1 text-center font-mono font-bold bg-gray-50 text-gray-800">{item.t}</td>
                         </tr>
                       ))}
-                      <tr className="bg-gray-50/70 border-t border-gray-300 font-bold">
-                        <td className="p-1 border-r border-gray-200 text-right pr-2 uppercase">TOTAL {group.nome}</td>
-                        <td className="p-1 border-r border-gray-200"></td>
-                        <td className="p-1 border-r border-gray-200 text-center font-mono">{totalC}</td>
-                        <td className="p-1 border-r border-gray-200 text-center font-mono">{totalF}</td>
-                        <td className="p-1 border-r border-gray-200 text-center font-mono">{totalA}</td>
-                        <td className="p-1 text-center font-mono text-blue-900 bg-blue-50">{totalT}</td>
-                      </tr>
+                      {sg.isLastPart && (
+                        <tr className="bg-gray-50/70 border-t border-gray-300 font-bold">
+                          <td className="p-1 border-r border-gray-200 text-right pr-2 uppercase">TOTAL {sg.groupName}</td>
+                          <td className="p-1 border-r border-gray-200"></td>
+                          <td className="p-1 border-r border-gray-200 text-center font-mono">{sg.totalC}</td>
+                          <td className="p-1 border-r border-gray-200 text-center font-mono">{sg.totalF}</td>
+                          <td className="p-1 border-r border-gray-200 text-center font-mono">{sg.totalA}</td>
+                          <td className="p-1 text-center font-mono text-blue-900 bg-blue-50">{sg.totalT}</td>
+                        </tr>
+                      )}
                     </tbody>
                   </table>
                 </div>
-              );
-            })
-          ) : (
-            <p className="text-gray-400 italic text-[8px] text-center p-3">Nenhum trabalhador detalhado no quadro de efetivo.</p>
+              ))}
+            </div>
+          </div>
+
+          {/* EQUIPAMENTOS INCLUDED ON LAST EFETIVO PAGE IF SMALL */}
+          {canIncludeEquip && (
+            <div>
+              <h4 className="text-[9px] font-bold bg-[#004899] text-white py-0.5 px-2 uppercase tracking-wide">
+                EQUIPAMENTOS MOBILIZADOS — DETALHAMENTO DE EQUIPAMENTO MECÂNICO
+              </h4>
+              <div className="border border-gray-300">
+                <table className="w-full text-left font-sans text-[8px] border-collapse">
+                  <thead>
+                    <tr className="bg-gray-100 border-b border-gray-300 text-gray-500 font-bold uppercase text-[7.5px]">
+                      <th className="p-1 px-2 border-r border-gray-200 w-16 text-center">Ref</th>
+                      <th className="p-1 border-r border-gray-200">DESCRIÇÃO DO EQUIPAMENTO</th>
+                      <th className="p-1 border-r border-gray-200 w-32">EMPRESA RESPONSÁVEL / PROPRIEDADE</th>
+                      <th className="p-1 w-24 text-center">QTD MOBILIZADA</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200 bg-white">
+                    {equipItemsAll.map((eq, eIdx) => (
+                      <tr key={eq.id || eIdx} className="hover:bg-slate-50">
+                        <td className="p-1 text-center border-r border-gray-200 text-gray-400 font-mono">
+                          {(eIdx + 1).toString().padStart(2, "0")}
+                        </td>
+                        <td className="p-1 px-2 border-r border-gray-200 font-medium text-gray-800">{eq.descricao}</td>
+                        <td className="p-1 border-r border-gray-200 text-gray-600">{eq.empresa}</td>
+                        <td className="p-1 text-center font-bold font-mono text-gray-800">{eq.quantidade}</td>
+                      </tr>
+                    ))}
+                    <tr className="bg-gray-50 font-bold text-gray-800 border-t border-gray-300">
+                      <td className="p-1 border-r border-gray-200"></td>
+                      <td className="p-1 px-2 border-r border-gray-200 text-right uppercase text-[7.5px]">TOTAL EQUIPAMENTOS MOBILIZADOS</td>
+                      <td className="p-1 border-r border-gray-200"></td>
+                      <td className="p-1 text-center font-mono text-blue-900 bg-blue-50/50">
+                        {equipItemsAll.reduce((sum, eq) => sum + (eq.quantidade || 0), 0)}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
           )}
         </div>
-      </div>
+      );
+    });
+  }
 
-      {/* EQUIPAMENTOS MOBILIZADOS DETAIL */}
-      <div>
-        <h4 className="text-[9px] font-bold bg-[#004899] text-white py-0.5 px-2 uppercase tracking-wide">
-          EQUIPAMENTOS MOBILIZADOS — DETALHAMENTO DE EQUIPAMENTO MECÂNICO
-        </h4>
-        <div className="border border-gray-300">
-          <table className="w-full text-left font-sans text-[8px] border-collapse">
-            <thead>
-              <tr className="bg-gray-100 border-b border-gray-300 text-gray-500 font-bold uppercase text-[7.5px]">
-                <th className="p-1 px-2 border-r border-gray-200 w-16 text-center">Ref</th>
-                <th className="p-1 border-r border-gray-200">DESCRIÇÃO DO EQUIPAMENTO</th>
-                <th className="p-1 border-r border-gray-200 w-32">EMPRESA RESPONSÁVEL / PROPRIEDADE</th>
-                <th className="p-1 w-24 text-center">QTD MOBILIZADA</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-200 bg-white">
-              {report.equipamentosDetalhado && report.equipamentosDetalhado.length > 0 ? (
-                report.equipamentosDetalhado.map((eq, eIdx) => (
-                  <tr key={eq.id || eIdx} className="hover:bg-slate-50">
-                    <td className="p-1 text-center border-r border-gray-200 text-gray-400 font-mono">
-                      {(eIdx + 1).toString().padStart(2, "0")}
-                    </td>
-                    <td className="p-1 px-2 border-r border-gray-200 font-medium text-gray-800">{eq.descricao}</td>
-                    <td className="p-1 border-r border-gray-200 text-gray-600">{eq.empresa}</td>
-                    <td className="p-1 text-center font-bold font-mono text-gray-800">{eq.quantidade}</td>
+  // 2. Process Equipamentos on dedicated pages if not already merged into last Efetivo page
+  if (equipItemsAll.length > 0 && !hasMergedEquip) {
+    const equipChunks = chunkArray(equipItemsAll, 14);
+
+    equipChunks.forEach((chk, eqPIdx) => {
+      const isLastEquipChunk = eqPIdx === equipChunks.length - 1;
+      const totalEquipQty = equipItemsAll.reduce((sum, eq) => sum + (eq.quantidade || 0), 0);
+
+      pages.push(
+        <div key={`page-equip-${eqPIdx}`} className="flex flex-col gap-3 text-[8.5px]">
+          <div>
+            <h4 className="text-[9px] font-bold bg-[#004899] text-white py-0.5 px-2 uppercase tracking-wide flex justify-between items-center">
+              <span>EQUIPAMENTOS MOBILIZADOS — DETALHAMENTO DE EQUIPAMENTO MECÂNICO {equipChunks.length > 1 ? `(PARTE ${eqPIdx + 1} DE ${equipChunks.length})` : ''}</span>
+              <span className="text-[7.5px] font-normal font-mono">Total: {totalEquipQty} un</span>
+            </h4>
+            <div className="border border-gray-300 mt-1">
+              <table className="w-full text-left font-sans text-[8px] border-collapse">
+                <thead>
+                  <tr className="bg-gray-100 border-b border-gray-300 text-gray-500 font-bold uppercase text-[7.5px]">
+                    <th className="p-1 px-2 border-r border-gray-200 w-16 text-center">Ref</th>
+                    <th className="p-1 border-r border-gray-200">DESCRIÇÃO DO EQUIPAMENTO</th>
+                    <th className="p-1 border-r border-gray-200 w-32">EMPRESA RESPONSÁVEL / PROPRIEDADE</th>
+                    <th className="p-1 w-24 text-center">QTD MOBILIZADA</th>
                   </tr>
-                ))
-              ) : (
-                <tr>
-                  <td colSpan={4} className="p-3 text-center text-gray-400 italic">Nenhum equipamento mecânico cadastrado no dia.</td>
-                </tr>
-              )}
-              <tr className="bg-gray-50 font-bold text-gray-800 border-t border-gray-300">
-                <td className="p-1 border-r border-gray-200"></td>
-                <td className="p-1 px-2 border-r border-gray-200 text-right uppercase text-[7.5px]">TOTAL EQUIPAMENTOS MOBILIZADOS</td>
-                <td className="p-1 border-r border-gray-200"></td>
-                <td className="p-1 text-center font-mono text-blue-900 bg-blue-50/50">
-                  {report.equipamentosDetalhado ? report.equipamentosDetalhado.reduce((sum, eq) => sum + (eq.quantidade || 0), 0) : 0}
-                </td>
-              </tr>
-            </tbody>
-          </table>
+                </thead>
+                <tbody className="divide-y divide-gray-200 bg-white">
+                  {chk.map((eq, eIdx) => {
+                    const globalIdx = eqPIdx * 14 + eIdx;
+                    return (
+                      <tr key={eq.id || eIdx} className="hover:bg-slate-50">
+                        <td className="p-1 text-center border-r border-gray-200 text-gray-400 font-mono">
+                          {(globalIdx + 1).toString().padStart(2, "0")}
+                        </td>
+                        <td className="p-1 px-2 border-r border-gray-200 font-medium text-gray-800">{eq.descricao}</td>
+                        <td className="p-1 border-r border-gray-200 text-gray-600">{eq.empresa}</td>
+                        <td className="p-1 text-center font-bold font-mono text-gray-800">{eq.quantidade}</td>
+                      </tr>
+                    );
+                  })}
+                  {isLastEquipChunk && (
+                    <tr className="bg-gray-50 font-bold text-gray-800 border-t border-gray-300">
+                      <td className="p-1 border-r border-gray-200"></td>
+                      <td className="p-1 px-2 border-r border-gray-200 text-right uppercase text-[7.5px]">TOTAL EQUIPAMENTOS MOBILIZADOS</td>
+                      <td className="p-1 border-r border-gray-200"></td>
+                      <td className="p-1 text-center font-mono text-blue-900 bg-blue-50/50">
+                        {totalEquipQty}
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
-      </div>
-    </div>
-  );
+      );
+    });
+  }
 
 
 
