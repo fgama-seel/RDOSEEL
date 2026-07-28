@@ -60,6 +60,11 @@
       right: 8mm !important;
       width: calc(100% - 16mm) !important;
     }
+
+    table, tr, td, th {
+      page-break-inside: avoid !important;
+      break-inside: avoid !important;
+    }
   }
 }
 

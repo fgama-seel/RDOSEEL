@@ -4,7 +4,7 @@
  */
 
 import React from "react";
-import { RdoReport, StoppageDetailRow } from "../types";
+import { RdoReport, StoppageDetailRow, Activity } from "../types";
 import { RainChart } from "./RainChart";
 import { ArrowLeft, Printer, ShieldCheck, FileText, ChevronLeft, ChevronRight } from "lucide-react";
 import { useRdoStore } from "../context/RdoContext";
@@ -52,7 +52,6 @@ const getCategoryLabel = (key: string): string => {
 
 // Barcode svg simulator
 const BarcodeSvg: React.FC<{ code: string }> = ({ code }) => {
-  // Generate pseudo-random line widths
   const lines = [];
   let seed = 0;
   for (let i = 0; i < code.length; i++) {
@@ -60,7 +59,6 @@ const BarcodeSvg: React.FC<{ code: string }> = ({ code }) => {
   }
   for (let i = 0; i < 40; i++) {
     const w = ((seed + i) % 3) + 1;
-    const spacing = ((seed * i) % 2) + 1;
     lines.push(<line key={i} x1={i * 4} y1="0" x2={i * 4} y2="30" stroke="black" strokeWidth={w} />);
   }
   return (
@@ -78,14 +76,12 @@ const QrCodeSvg: React.FC<{ value: string }> = ({ value }) => {
   return (
     <svg width="40" height="40" viewBox="0 0 10 10" className="opacity-90">
       <rect width="10" height="10" fill="white" />
-      {/* Draw square mock grids */}
       <rect x="0" y="0" width="3" height="3" fill="black" />
       <rect x="1" y="1" width="1" height="1" fill="white" />
       <rect x="7" y="0" width="3" height="3" fill="black" />
       <rect x="8" y="1" width="1" height="1" fill="white" />
       <rect x="0" y="7" width="3" height="3" fill="black" />
       <rect x="1" y="7" width="1" height="1" fill="white" />
-      {/* Random internal dots */}
       <rect x="4" y="1" width="1" height="1" fill="black" />
       <rect x="5" y="2" width="1" height="1" fill="black" />
       <rect x="4" y="4" width="2" height="2" fill="black" />
@@ -98,7 +94,25 @@ const QrCodeSvg: React.FC<{ value: string }> = ({ value }) => {
 
 const SingleReportPrint: React.FC<{ report: RdoReport }> = ({ report }) => {
   const { obras, reports } = useRdoStore();
+  
+  // Find current Obra object from store to populate missing contract / Obra details
   const currentObra = obras.find(o => o.id === report.obraId || o.nome === report.obra);
+
+  const obraNome = report.obra || currentObra?.nome || "OBRA NÃO IDENTIFICADA";
+  const contratoNo = currentObra?.numeroContrato || report.contratoNo || "-";
+  const clienteContratante = currentObra?.cliente || report.cliente || report.contratante || "-";
+  const empresaContratada = currentObra?.contratada || report.contratada || "SEEL ENGENHARIA LTDA";
+  const gerenciadora = currentObra?.gerenciadora || report.gerenciadora || "-";
+  
+  const inicioDate = currentObra?.dataInicio 
+    ? new Date(currentObra.dataInicio + "T12:00:00").toLocaleDateString("pt-BR")
+    : (report.inicio || "-");
+  const terminoDate = report.termino || "-";
+  const prazoTotal = currentObra 
+    ? (Number(currentObra.prazoContratual || 0) + Number(currentObra.aditivoPrazo || 0))
+    : Number(report.prazo || 0);
+  const prazoIncorrido = Number(report.prazoIncorrido || 0);
+  const prazoRemanescente = Math.max(0, prazoTotal - prazoIncorrido);
 
   const displayEmitenteNome = report.emitenteAssinado
     ? (report.emitenteNome || currentObra?.emissorNomeDefault || "")
@@ -109,43 +123,38 @@ const SingleReportPrint: React.FC<{ report: RdoReport }> = ({ report }) => {
     : (currentObra?.fiscalGerenciadoraNomeDefault || report.gerenciadoraNome || "Fiscal da Gerenciadora");
 
   const displayContratanteNome = report.contratanteAssinado
-    ? (report.contratanteNome || currentObra?.fiscalAprovadorNomeDefault || "")
-    : (currentObra?.fiscalAprovadorNomeDefault || report.contratanteNome || "Fiscal Contratante");
+    ? (report.contratanteNome || currentObra?.fiscalContratanteNomeDefault || "")
+    : (currentObra?.fiscalContratanteNomeDefault || report.contratanteNome || "Fiscal da Contratante");
 
-  const hoursList = [
-    "6h", "7h", "8h", "9h", "10h", "11h", "12h", "13h", "14h", "15h", "16h", "17h", "18h", "19h", "20h", "21h", "22h", "23h",
-    "0h", "1h", "2h", "3h", "4h", "5h"
-  ];
-
-  // Build Monthly Daily Rain Data
+  // Build Daily Monthly Rain Data
   const [monthlyRainLabels, monthlyRainValues] = React.useMemo(() => {
     const rDate = report.data; // YYYY-MM-DD
     if (!rDate) return [[], []];
     
-    const [year, month, dayStr] = rDate.split('-');
-    const currentDay = parseInt(dayStr, 10);
-    const numDays = currentDay; // up to the report's day
+    const [year, month] = rDate.split('-');
+    const daysInMonth = new Date(parseInt(year, 10), parseInt(month, 10), 0).getDate();
     
-    // Initialize day map
-    const dailyValues = new Array(numDays).fill({}).map((_, i) => ({ day: i + 1, total: 0 }));
+    const dailyValues: { day: number; total: number }[] = [];
     
-    const relevantReports = reports.filter(r => {
-      if ((r.obraId !== report.obraId) && (r.obra !== report.obra)) return false;
-      if (!r.data || !r.data.startsWith(`${year}-${month}`)) return false;
-      return parseInt(r.data.split('-')[2], 10) <= currentDay;
-    });
+    for (let d = 1; d <= daysInMonth; d++) {
+      const dayStr = String(d).padStart(2, '0');
+      const targetDate = `${year}-${month}-${dayStr}`;
+      
+      const rep = reports.find(r => 
+        ((r.obraId === report.obraId) || (r.obra === report.obra)) && 
+        r.data === targetDate
+      );
+      
+      const val = rep ? Number(rep.precipitacao?.total || 0) : 0;
+      dailyValues.push({ day: d, total: val });
+    }
 
-    relevantReports.forEach(r => {
-      const d = parseInt(r.data.split('-')[2], 10);
-      const val = Number(r.precipitacao?.total || 0);
-      const cell = dailyValues.find(x => x.day === d);
-      if (cell) cell.total = Math.max(cell.total, val); // in case of multiple reports same day, take max or sum, let's take max.
-    });
-
-    // Special case for the current report (if it's not saved to store yet or has newer modifications)
-    const currentVal = Number(report.precipitacao?.total || 0);
-    const cell = dailyValues.find(x => x.day === currentDay);
-    if (cell) cell.total = Math.max(cell.total, currentVal);
+    if (report.data) {
+      const curDay = parseInt(report.data.split('-')[2], 10);
+      if (curDay >= 1 && curDay <= daysInMonth) {
+        dailyValues[curDay - 1].total = Number(report.precipitacao?.total || 0);
+      }
+    }
 
     return [
       dailyValues.map(d => String(d.day)),
@@ -161,9 +170,8 @@ const SingleReportPrint: React.FC<{ report: RdoReport }> = ({ report }) => {
     const [year] = rDate.split('-');
     const months = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
     
-    // Sum MAX daily precipitation per day over the month to avoid duplicate reports counting twice
     const monthDaySums: Record<number, Record<string, number>> = {};
-    for (let m=1; m<=12; m++) monthDaySums[m] = {};
+    for (let m = 1; m <= 12; m++) monthDaySums[m] = {};
     
     const relevantReports = reports.filter(r => {
       if ((r.obraId !== report.obraId) && (r.obra !== report.obra)) return false;
@@ -180,595 +188,593 @@ const SingleReportPrint: React.FC<{ report: RdoReport }> = ({ report }) => {
     });
 
     const valMap = new Array(12).fill(0);
-    for (let m=1; m<=12; m++) {
-      valMap[m-1] = Object.values(monthDaySums[m]).reduce((acc, v) => acc + v, 0);
+    for (let m = 1; m <= 12; m++) {
+      valMap[m - 1] = Object.values(monthDaySums[m]).reduce((acc, v) => acc + v, 0);
     }
     
     return [months, valMap];
   }, [report, reports]);
 
   // Helper component to render signatures footer
-  const PrintFooter: React.FC<{ pageNum: number }> = ({ pageNum }) => (
+  const PrintFooter: React.FC<{ pageNum: number; totalPages?: number }> = ({ pageNum, totalPages = 1 }) => (
     <div className="border-t border-gray-300 grid grid-cols-4 gap-2 text-center text-[10px] mt-auto pt-2 print-footer bg-white">
       {/* EMITENTE */}
       <div className="border-r border-gray-200 pr-2 flex flex-col justify-end align-middle h-24 pb-1">
         <span className="font-bold border-b border-gray-100 pb-1 text-gray-700 uppercase">EMITENTE</span>
-        {report.emitenteAssinado ? (
-          <div className="flex flex-col items-center justify-end h-16">
-            <span className="text-[7px] text-emerald-600 font-extrabold uppercase bg-emerald-50 border border-emerald-200 px-1 py-0.5 rounded leading-none mb-1">
-              ✓ ASSINADO DIGITALMENTE
-            </span>
-            <span className="text-[6px] text-slate-500 font-mono scale-[0.85] truncate max-w-full leading-none mb-1">
-              {report.emitenteConsolidado}
-            </span>
-            <span className="text-[6px] text-slate-400 font-mono scale-[0.85] truncate max-w-full leading-none mb-1">
-              HASH: {report.emitenteHash ? report.emitenteHash.substring(0, 16) : ""}
-            </span>
-            <span className="font-semibold block truncate max-w-full text-gray-800 leading-none mt-1">{displayEmitenteNome}</span>
-            <span className="text-[7px] text-gray-400 block font-mono mt-0.5">SEEL ENGENHARIA</span>
-          </div>
-        ) : (
-          <div className="flex flex-col items-center justify-end h-16">
-            <div className="w-4/5 border-b border-gray-300 mt-auto mb-1"></div>
-            <span className="font-semibold block truncate max-w-full text-gray-800 leading-none">{displayEmitenteNome}</span>
-            <span className="text-[7px] text-gray-400 block font-mono mt-1">SEEL ENGENHARIA</span>
-          </div>
-        )}
-      </div>
-      
-      {/* GERENCIADORA */}
-      <div className="border-r border-gray-200 pr-2 flex flex-col justify-end align-middle h-24 pb-1">
-        <span className="font-bold border-b border-gray-100 pb-1 text-gray-700 uppercase">GERENCIADORA</span>
-        {report.gerenciadoraAssinado ? (
-          <div className="flex flex-col items-center justify-end h-16">
-            <span className="text-[7px] text-emerald-600 font-extrabold uppercase bg-emerald-50 border border-emerald-200 px-1 py-0.5 rounded leading-none mb-1">
-              ✓ ASSINADO DIGITALMENTE
-            </span>
-            <span className="text-[6px] text-slate-500 font-mono scale-[0.85] truncate max-w-full leading-none mb-1">
-              {report.gerenciadoraConsolidado}
-            </span>
-            <span className="text-[6px] text-slate-400 font-mono scale-[0.85] truncate max-w-full leading-none mb-1">
-              HASH: {report.gerenciadoraHash ? report.gerenciadoraHash.substring(0, 16) : ""}
-            </span>
-            <span className="font-semibold block truncate max-w-full text-gray-800 leading-none mt-1">{displayGerenciadoraNome}</span>
-            <span className="text-[7px] text-gray-400 block font-mono mt-0.5">{report.gerenciadora || "GERENCIADORA"}</span>
-          </div>
-        ) : (
-          <div className="flex flex-col items-center justify-end h-16">
-            <div className="w-4/5 border-b border-gray-300 mt-auto mb-1"></div>
-            <span className="font-semibold block truncate max-w-full text-gray-800 leading-none">{displayGerenciadoraNome}</span>
-            <span className="text-[7px] text-gray-400 block font-mono mt-1">{report.gerenciadora || "GERENCIADORA"}</span>
-          </div>
-        )}
+        <div className="flex-1 flex flex-col items-center justify-center p-1">
+          {report.emitenteAssinado ? (
+            <div className="flex flex-col items-center">
+              <span className="font-mono text-[8px] text-green-700 font-semibold bg-green-50 border border-green-200 px-1.5 py-0.5 rounded flex items-center gap-1">
+                <ShieldCheck className="w-3 h-3 text-green-600 inline" />
+                ASSINADO DIGITALMENTE
+              </span>
+              <span className="text-[7.5px] text-gray-500 font-mono mt-0.5">{report.emitenteDataAssinatura || report.data}</span>
+            </div>
+          ) : (
+            <div className="border-b border-gray-400 w-3/4 my-2"></div>
+          )}
+        </div>
+        <span className="font-semibold text-gray-800 uppercase text-[8.5px]">{displayEmitenteNome}</span>
+        <span className="text-[7.5px] text-gray-400 uppercase">SEEL ENGENHARIA</span>
       </div>
 
       {/* CONTRATANTE */}
       <div className="border-r border-gray-200 pr-2 flex flex-col justify-end align-middle h-24 pb-1">
         <span className="font-bold border-b border-gray-100 pb-1 text-gray-700 uppercase">CONTRATANTE</span>
-        {report.contratanteAssinado ? (
-          <div className="flex flex-col items-center justify-end h-16">
-            <span className="text-[7px] text-emerald-600 font-extrabold uppercase bg-emerald-50 border border-emerald-200 px-1 py-0.5 rounded leading-none mb-1">
-              ✓ APROVADO DIGITALMENTE
-            </span>
-            <span className="text-[6px] text-slate-500 font-mono scale-[0.85] truncate max-w-full leading-none mb-1">
-              {report.contratanteAprovado}
-            </span>
-            <span className="text-[6px] text-slate-400 font-mono scale-[0.85] truncate max-w-full leading-none mb-1">
-              HASH: {report.contratanteHash ? report.contratanteHash.substring(0, 16) : ""}
-            </span>
-            <span className="font-semibold block truncate max-w-full text-gray-800 leading-none mt-1">{displayContratanteNome}</span>
-            <span className="text-[7px] text-gray-400 block font-mono mt-0.5">{report.cliente || "CLIENTE"}</span>
+        <div className="flex-1 flex flex-col items-center justify-center p-1">
+          {report.contratanteAssinado ? (
+            <div className="flex flex-col items-center">
+              <span className="font-mono text-[8px] text-green-700 font-semibold bg-green-50 border border-green-200 px-1.5 py-0.5 rounded flex items-center gap-1">
+                <ShieldCheck className="w-3 h-3 text-green-600 inline" />
+                ASSINADO DIGITALMENTE
+              </span>
+              <span className="text-[7.5px] text-gray-500 font-mono mt-0.5">{report.contratanteDataAssinatura || report.data}</span>
+            </div>
+          ) : (
+            <div className="border-b border-gray-400 w-3/4 my-2"></div>
+          )}
+        </div>
+        <span className="font-semibold text-gray-800 uppercase text-[8.5px]">{displayContratanteNome}</span>
+        <span className="text-[7.5px] text-gray-400 uppercase">{clienteContratante}</span>
+      </div>
+
+      {/* GERENCIADORA */}
+      <div className="border-r border-gray-200 pr-2 flex flex-col justify-end align-middle h-24 pb-1">
+        <span className="font-bold border-b border-gray-100 pb-1 text-gray-700 uppercase">GERENCIADORA</span>
+        <div className="flex-1 flex flex-col items-center justify-center p-1">
+          {report.gerenciadoraAssinado ? (
+            <div className="flex flex-col items-center">
+              <span className="font-mono text-[8px] text-green-700 font-semibold bg-green-50 border border-green-200 px-1.5 py-0.5 rounded flex items-center gap-1">
+                <ShieldCheck className="w-3 h-3 text-green-600 inline" />
+                ASSINADO DIGITALMENTE
+              </span>
+              <span className="text-[7.5px] text-gray-500 font-mono mt-0.5">{report.gerenciadoraDataAssinatura || report.data}</span>
+            </div>
+          ) : (
+            <div className="border-b border-gray-400 w-3/4 my-2"></div>
+          )}
+        </div>
+        <span className="font-semibold text-gray-800 uppercase text-[8.5px]">{displayGerenciadoraNome}</span>
+        <span className="text-[7.5px] text-gray-400 uppercase">{gerenciadora}</span>
+      </div>
+
+      {/* CONTROLE DIGITAL E FOLHA */}
+      <div className="flex flex-col justify-between items-center h-24 pb-1">
+        <div className="w-full flex justify-between items-center px-1 text-[7.5px] text-gray-400 border-b border-gray-100 pb-1">
+          <span>SISTEMA RDO</span>
+          <span className="font-mono font-bold text-gray-700">PÁGINA {pageNum} DE {totalPages}</span>
+        </div>
+        <BarcodeSvg code={report.uuid || `SEEL-${report.rdoNo}-${report.data}`} />
+        <div className="flex items-center gap-2 mt-1">
+          <QrCodeSvg value={report.uuid || report.id} />
+          <div className="text-left leading-tight">
+            <span className="block text-[6.5px] font-mono text-gray-400">CHAVE DE AUTENTICIDADE:</span>
+            <span className="block text-[7px] font-mono font-bold text-gray-800 truncate max-w-[90px]">{report.uuid?.slice(0, 16) || "SEEL-VERIFIED"}</span>
           </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  // Header component
+  const PrintHeader: React.FC = () => (
+    <div className="border-b-2 border-[#004899] pb-2 flex justify-between items-center mb-2">
+      <div className="flex items-center gap-3">
+        {currentObra?.logoUrl ? (
+          <img src={currentObra.logoUrl} alt="Logo Obra" className="h-10 max-w-32 object-contain" />
         ) : (
-          <div className="flex flex-col items-center justify-end h-16">
-            <div className="w-4/5 border-b border-gray-300 mt-auto mb-1"></div>
-            <span className="font-semibold block truncate max-w-full text-gray-800 leading-none">{displayContratanteNome}</span>
-            <span className="text-[7px] text-gray-400 block font-mono mt-1">{report.cliente || "CLIENTE"}</span>
+          <div className="h-10 w-24 bg-[#004899] text-white flex items-center justify-center font-bold text-xs rounded tracking-wider">
+            SEEL
+          </div>
+        )}
+        <div className="border-l border-gray-300 pl-3">
+          <h1 className="text-sm font-extrabold text-[#004899] uppercase tracking-wide">
+            RELATÓRIO DIÁRIO DE OBRA (RDO)
+          </h1>
+          <p className="text-[9px] font-bold text-gray-600 uppercase">
+            {obraNome}
+          </p>
+        </div>
+      </div>
+
+      <div className="text-right">
+        <div className="text-xs font-black text-[#004899] bg-blue-50 border border-blue-200 px-2.5 py-0.5 rounded font-mono inline-block">
+          {report.rdoNo.toUpperCase().startsWith("RDO") ? report.rdoNo : `RDO-${report.rdoNo}`}
+        </div>
+        <p className="text-[9px] font-bold text-gray-700 mt-0.5 font-mono">
+          DATA: {formatPrintDate(report.data)}
+        </p>
+      </div>
+    </div>
+  );
+
+  // Complete Report Info Block (Obra Details)
+  const ReportInfoBlock: React.FC = () => (
+    <div className="border border-gray-300 divide-y divide-gray-200 text-[8px] bg-slate-50/50">
+      {/* Line 1: Obra & Contrato */}
+      <div className="grid grid-cols-12 divide-x divide-gray-200 font-sans">
+        <div className="col-span-8 p-1.5 flex flex-col justify-center">
+          <span className="text-[7px] text-gray-400 block leading-tight font-bold">DENOMINAÇÃO DA OBRA</span>
+          <span className="font-extrabold text-gray-900 uppercase text-[9px] truncate">{obraNome}</span>
+        </div>
+        <div className="col-span-4 p-1.5 flex flex-col justify-center">
+          <span className="text-[7px] text-gray-400 block leading-tight font-bold">CONTRATO N.º</span>
+          <span className="font-bold text-gray-900 font-mono text-[8.5px]">{contratoNo}</span>
+        </div>
+      </div>
+
+      {/* Line 2: Contratada, Contratante, Gerenciadora */}
+      <div className="grid grid-cols-12 divide-x divide-gray-200 font-sans">
+        <div className="col-span-4 p-1.5 flex flex-col justify-center">
+          <span className="text-[7px] text-gray-400 block leading-tight font-bold">EMPRESA CONTRATADA</span>
+          <span className="font-extrabold text-[#004899] text-[8.5px]">{empresaContratada}</span>
+        </div>
+        <div className="col-span-4 p-1.5 flex flex-col justify-center">
+          <span className="text-[7px] text-gray-400 block leading-tight font-bold">CONTRATANTE / CLIENTE</span>
+          <span className="font-bold text-gray-800 text-[8.5px]">{clienteContratante}</span>
+        </div>
+        <div className="col-span-4 p-1.5 flex flex-col justify-center">
+          <span className="text-[7px] text-gray-400 block leading-tight font-bold">GERENCIADORA / FISCALIZAÇÃO</span>
+          <span className="font-bold text-gray-800 text-[8.5px]">{gerenciadora}</span>
+        </div>
+      </div>
+
+      {/* Line 3: Prazos, Inicio, Termino */}
+      <div className="grid grid-cols-12 divide-x divide-gray-200 font-sans bg-white">
+        <div className="col-span-3 p-1 flex flex-col justify-center">
+          <span className="text-[6.5px] text-gray-400 block leading-tight font-bold">DATA DE INÍCIO</span>
+          <span className="font-bold text-gray-800 font-mono text-[8px]">{inicioDate}</span>
+        </div>
+        <div className="col-span-3 p-1 flex flex-col justify-center">
+          <span className="text-[6.5px] text-gray-400 block leading-tight font-bold">TÉRMINO PREVISTO</span>
+          <span className="font-bold text-gray-800 font-mono text-[8px]">{terminoDate}</span>
+        </div>
+        <div className="col-span-2 p-1 flex flex-col justify-center">
+          <span className="text-[6.5px] text-gray-400 block leading-tight font-bold">PRAZO TOTAL</span>
+          <span className="font-bold text-gray-800 font-mono text-[8px]">{prazoTotal} dias</span>
+        </div>
+        <div className="col-span-2 p-1 flex flex-col justify-center">
+          <span className="text-[6.5px] text-gray-400 block leading-tight font-bold">INCORRIDO</span>
+          <span className="font-bold text-gray-800 font-mono text-[8px]">{prazoIncorrido} dias</span>
+        </div>
+        <div className="col-span-2 p-1 flex flex-col justify-center bg-blue-50/50">
+          <span className="text-[6.5px] text-blue-800 block leading-tight font-bold">REMANESCENTE</span>
+          <span className="font-extrabold text-blue-900 font-mono text-[8px]">{prazoRemanescente} dias</span>
+        </div>
+      </div>
+    </div>
+  );
+
+  // Helper to render an activity card with inline image gallery
+  const renderActivityCard = (act: Activity, idx: number) => {
+    const activityComments = act.comentario || act.comentarios;
+    const activityImages = act.imagens && act.imagens.length > 0 ? act.imagens : [];
+
+    return (
+      <div key={act.id || idx} className="p-2 flex flex-col gap-1.5 text-[8px] bg-white border border-gray-200 rounded my-1">
+        <div className="flex items-center justify-between border-b border-gray-100 pb-1">
+          <div className="flex items-center gap-1.5">
+            <span className="font-extrabold text-[#004899] uppercase text-[8.5px]">
+              #{(idx + 1).toString().padStart(2, "0")} — {act.fase ? `[${act.fase}] ` : ""}{act.local || act.identificador || "Frente de Serviço"}
+            </span>
+            {act.ref && (
+              <span className="text-[7px] bg-gray-100 text-gray-700 font-mono px-1 rounded border border-gray-200">
+                Ref: {act.ref}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            {act.total && (
+              <span className="font-mono font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-1.5 py-0.2 rounded text-[7.5px]">
+                Qtd: {act.total} {act.intervalo || "un"}
+              </span>
+            )}
+            {act.pqItemDesc && (
+              <span className="text-[7.5px] bg-blue-50 text-blue-900 border border-blue-200 font-mono px-1 rounded">
+                Planilha PQ: {act.pqItemDesc}
+              </span>
+            )}
+          </div>
+        </div>
+
+        <div className="text-gray-800 leading-relaxed font-normal text-[8.5px]">
+          <FormattedText text={act.descricao} />
+        </div>
+
+        {activityComments && (
+          <div className="text-[7.5px] text-gray-600 italic bg-gray-50 p-1 border border-gray-200 rounded">
+            <span className="font-bold not-italic text-gray-700">Comentários: </span>
+            <FormattedText text={activityComments} />
+          </div>
+        )}
+
+        {/* Activity Images inline gallery */}
+        {activityImages.length > 0 && (
+          <div className="mt-2 pt-1 border-t border-gray-100">
+            <span className="text-[8px] font-bold text-[#004899] uppercase block mb-1.5">
+              Fotos Anexas da Atividade ({activityImages.length}):
+            </span>
+            <div className="grid grid-cols-2 gap-2.5">
+              {activityImages.map((imgUrl, imgIdx) => (
+                <div key={imgIdx} className="border border-gray-300 rounded p-1.5 bg-white shadow-2xs flex flex-col items-center">
+                  <div className="w-full h-52 flex items-center justify-center bg-gray-50 rounded border border-gray-200 overflow-hidden">
+                    <img
+                      src={imgUrl}
+                      alt={`Foto ${imgIdx + 1} - Atividade ${idx + 1}`}
+                      className="max-h-52 max-w-full object-contain"
+                    />
+                  </div>
+                  <span className="text-[7.5px] font-bold text-gray-700 mt-1 uppercase">
+                    Foto {imgIdx + 1} de {activityImages.length}
+                  </span>
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </div>
+    );
+  };
 
-      <div className="flex flex-col justify-between align-middle items-center h-24 text-[9px]">
-        <span className="font-bold text-gray-700 text-center uppercase tracking-wide">Paginação</span>
-        <div className="text-center font-sans">
-          <p className="font-bold text-gray-800">Pág.{pageNum}</p>
-          <p className="text-gray-400">de 3</p>
+  // BUILD DYNAMIC PAGES ARRAY FOR PERFECT PDF GENERATION
+  const pages: React.ReactNode[] = [];
+
+  // PAGE 1: DADOS GERAIS, RESUMOS E PRIMEIRAS ATIVIDADES
+  const firstActivitiesBatch = report.atividades ? report.atividades.slice(0, 2) : [];
+
+  pages.push(
+    <div key="page-1" className="flex flex-col gap-2.5 text-[8.5px]">
+      <ReportInfoBlock />
+
+      {/* ACIDENTES vs EFETIVO SUMMARY */}
+      <div className="mt-1 grid grid-cols-2 gap-2">
+        {/* Acidentes Summary Table */}
+        <div className="border border-gray-300">
+          <div className="bg-[#004899]/5 font-bold text-[8px] text-[#004899] px-2 py-0.5 border-b border-gray-300 flex justify-between">
+            <span>ACIDENTES</span>
+            <span className="text-gray-400">(resumo)</span>
+          </div>
+          <div className="text-[8px] divide-y divide-gray-200">
+            <div className="flex justify-between p-1">
+              <span>Acidentes com afastamento no dia</span>
+              <span className="font-bold font-mono">{report.acidentes.comAfastamentoDia}</span>
+            </div>
+            <div className="flex justify-between p-1">
+              <span>Acidentes com afastamento - ausentes no dia</span>
+              <span className="font-bold font-mono">{report.acidentes.comAfastamentoAusentesDia}</span>
+            </div>
+            <div className="flex justify-between p-1">
+              <span>Acidentes com afastamento - acumulado obra</span>
+              <span className="font-bold font-mono">{report.acidentes.comAfastamentoAcumulado}</span>
+            </div>
+            <div className="flex justify-between p-1">
+              <span>Acidentes sem afastamento no dia</span>
+              <span className="font-bold font-mono">{report.acidentes.semAfastamentoDia}</span>
+            </div>
+            <div className="flex justify-between p-1">
+              <span>Acidentes sem afastamento - acumulado obra</span>
+              <span className="font-bold font-mono">{report.acidentes.semAfastamentoAcumulado}</span>
+            </div>
+          </div>
         </div>
-        <QrCodeSvg value={`RDO-${report.rdoNo}-PAGE-${pageNum}`} />
-      </div>
-    </div>
-  );
 
-  // Common Headings inside A4 sheet
-  const PrintHeader = () => (
-    <div className="flex justify-between items-stretch border border-gray-300 pb-0 bg-white">
-      {/* Sabesp + Seel Vector representation */}
-      <div className="w-1/4 min-w-[120px] p-2 flex flex-col justify-center items-center border-r border-gray-300 gap-1">
-        <div className="flex items-center gap-1 w-full justify-center">
-          {currentObra?.logoCliente ? (
-            <img src={currentObra.logoCliente} alt="Logo Cliente" className="h-8 max-w-[50%] object-contain" referrerPolicy="no-referrer" />
+        {/* Efetivo Summary Table */}
+        <div className="border border-gray-300">
+          <div className="bg-[#004899]/5 font-bold text-[8px] text-[#004899] px-2 py-0.5 border-b border-gray-300 flex justify-between">
+            <span>EFETIVO</span>
+            <span className="text-gray-400">(resumo)</span>
+          </div>
+          <div className="text-[8px] divide-y divide-gray-200">
+            <div className="flex justify-between p-1">
+              <span>Mão de Obra Indireta (MOI)</span>
+              <span className="font-bold font-mono">{report.efetivoSummary.moiTotal}</span>
+            </div>
+            <div className="flex justify-between p-1">
+              <span>Mão de Obra Direta (MOD)</span>
+              <span className="font-bold font-mono">{report.efetivoSummary.modTotal}</span>
+            </div>
+            <div className="flex justify-between p-1">
+              <span>Subcontratados / Terceiros</span>
+              <span className="font-bold font-mono">{report.efetivoSummary.subcontratadosTotal}</span>
+            </div>
+            <div className="flex justify-between p-1 text-red-600">
+              <span>Afastados / Faltas / Licenças</span>
+              <span className="font-bold font-mono">{report.efetivoSummary.afastadosTotal}</span>
+            </div>
+            <div className="flex justify-between p-1 bg-gray-50 font-bold text-[#004899]">
+              <span>TOTAL DE PRESENTES NO DIA</span>
+              <span className="font-mono">{report.efetivoSummary.totalGeralPresentes}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* PARALISAÇÕES vs EQUIPAMENTOS SUMMARY */}
+      <div className="grid grid-cols-2 gap-2">
+        {/* Paralisações Summary */}
+        <div className="border border-gray-300">
+          <div className="bg-[#004899]/5 font-bold text-[8px] text-[#004899] px-2 py-0.5 border-b border-gray-300 flex justify-between">
+            <span>PARALISAÇÕES DO EFETIVO</span>
+            <span className="text-gray-400">(resumo)</span>
+          </div>
+          <div className="text-[8px] divide-y divide-gray-200">
+            <div className="flex justify-between p-1">
+              <span>Horas Paralisadas no Dia</span>
+              <span className="font-bold font-mono text-red-600">{report.paralisacoesSummary.totalHorasParalisadasDia}h</span>
+            </div>
+            <div className="flex justify-between p-1">
+              <span>Ocorrências de Paralisação</span>
+              <span className="font-bold font-mono">{report.paralisacoesSummary.numeroParalisacoes}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Equipamentos Summary */}
+        <div className="border border-gray-300">
+          <div className="bg-[#004899]/5 font-bold text-[8px] text-[#004899] px-2 py-0.5 border-b border-gray-300 flex justify-between">
+            <span>EQUIPAMENTOS MOBILIZADOS</span>
+            <span className="text-gray-400">(resumo)</span>
+          </div>
+          <div className="text-[8px] divide-y divide-gray-200">
+            <div className="flex justify-between p-1">
+              <span>Equipamentos Próprios / Locados</span>
+              <span className="font-bold font-mono">{report.equipamentosSummary.proptiosLocados}</span>
+            </div>
+            <div className="flex justify-between p-1">
+              <span>Equipamentos de Subcontratados</span>
+              <span className="font-bold font-mono">{report.equipamentosSummary.subcontratados}</span>
+            </div>
+            <div className="flex justify-between p-1 bg-gray-50 font-bold text-[#004899]">
+              <span>TOTAL EQUIPAMENTOS</span>
+              <span className="font-mono">{report.equipamentosSummary.totalEquipamentos}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ATIVIDADES EXECUTADAS (PRIMEIRO BLOCO: ATÉ 2 ATIVIDADES) */}
+      <div className="mt-1">
+        <h3 className="text-[9px] font-bold bg-[#004899] text-white py-0.5 px-2 uppercase tracking-wide">
+          ATIVIDADES EXECUTADAS NO PERÍODO — FASES DE CAMPO
+        </h3>
+
+        <div className="mt-1 border border-gray-300 divide-y divide-gray-200 bg-white">
+          {firstActivitiesBatch.length > 0 ? (
+            firstActivitiesBatch.map((act, idx) => renderActivityCard(act, idx))
           ) : (
-            <div className="bg-[#00adef] text-white font-black text-[10px] px-1 rounded-sm tracking-tighter flex items-center h-5">
-              SABESP
+            <div className="p-3 text-center text-gray-400 italic text-[8px]">
+              Nenhuma atividade de campo informada neste relatório.
             </div>
           )}
-          {currentObra?.logoSeel ? (
-            <img src={currentObra.logoSeel} alt="Logo Contratada" className="h-8 max-w-[50%] object-contain" referrerPolicy="no-referrer" />
-          ) : (
-            <div className="bg-[#004899] text-white font-extrabold text-[10px] px-1 rounded-sm leading-tight flex items-center h-5 border border-[#3b82f6]">
-              SEEL
-            </div>
-          )}
         </div>
-        <span className="text-[7px] text-center font-semibold text-gray-400 block tracking-tight">SERVIÇOS DE ENGENHARIA</span>
-      </div>
-
-      <div className="flex-1 px-4 py-2 flex flex-col justify-center items-center border-r border-gray-300 text-center">
-        <h1 className="text-lg font-bold tracking-tight text-gray-800 font-sans uppercase">Relatório Diário de Obras</h1>
-        <p className="text-[8px] text-gray-400 font-sans tracking-widest mt-0.5">FORMULÁRIO DIÁRIO INTEGRADO - VERSÃO WEB</p>
-      </div>
-
-      <div className="w-1/4 p-2 flex flex-col justify-center bg-[#004899] text-white text-center leading-none">
-        <span className="text-[9px] uppercase tracking-wider text-blue-200">RDO Nº</span>
-        <span className="text-sm font-bold block mt-1 tracking-wider">{report.rdoNo}</span>
       </div>
     </div>
   );
 
-  // Key-Value Grid Block
-  const ReportInfoBlock = () => (
-    <div className="mt-2 border border-gray-300 text-[9px] grid grid-cols-12 gap-0 divide-x divide-y divide-gray-300 bg-white">
-      <div className="col-span-12 md:col-span-8 p-1.5 flex items-center">
-        <span className="font-bold text-gray-500 uppercase mr-1">OBRA:</span>
-        <span className="font-bold text-[#004899] text-xs">{report.obra}</span>
-      </div>
-      <div className="col-span-12 md:col-span-4 p-1.5 flex items-center">
-        <span className="font-bold text-gray-500 uppercase mr-1">DATA:</span>
-        <span className="font-bold text-gray-800">{formatPrintDate(report.data)}</span>
-      </div>
+  // PAGE CONTINUATION FOR REMAINING ATIVIDADES & FATOS RELEVANTES
+  const remainingActivities = report.atividades ? report.atividades.slice(2) : [];
+  if (remainingActivities.length > 0 || (report.fatosRelevantes && report.fatosRelevantes.length > 0)) {
+    // Chunk remaining activities in groups of 3
+    const activityChunks = remainingActivities.length > 0
+      ? Array.from({ length: Math.ceil(remainingActivities.length / 3) }, (_, i) => remainingActivities.slice(i * 3, i * 3 + 3))
+      : [];
 
-      <div className="col-span-4 p-1.5 flex items-center">
-        <span className="font-bold text-gray-500 uppercase mr-1">CLIENTE:</span>
-        <span className="font-semibold text-gray-800">{report.cliente}</span>
-      </div>
-      <div className="col-span-4 p-1.5 flex items-center">
-        <span className="font-bold text-gray-500 uppercase mr-1">CONTRATADA:</span>
-        <span className="font-bold text-gray-800">{report.contratada || "SEEL ENGENHARIA"}</span>
-      </div>
-      <div className="col-span-4 p-1.5 flex items-center">
-        <span className="font-bold text-gray-500 uppercase mr-1">GESTOR:</span>
-        <span className="font-semibold text-gray-800">{report.gestor}</span>
-      </div>
-
-      {/* Deadlines Block */}
-      <div className="col-span-4 p-1 flex flex-col">
-        <span className="text-[7px] text-gray-400 block leading-tight">PRAZO CONTRATUAL</span>
-        <span className="font-bold text-gray-800">{report.prazo} dias</span>
-      </div>
-      <div className="col-span-4 p-1 flex flex-col">
-        <span className="text-[7px] text-gray-400 block leading-tight">PRAZO INCORRIDO</span>
-        <span className="font-bold text-gray-800">{report.prazoIncorrido} dias</span>
-      </div>
-      <div className="col-span-4 p-1 flex flex-col">
-        <span className="text-[7px] text-gray-400 block leading-tight">PRAZO REMANESCENTE</span>
-        <span className="font-bold text-gray-800">{report.prazoFaltante} dias</span>
-      </div>
-
-      <div className="col-span-4 p-1 flex flex-col">
-        <span className="text-[7px] text-gray-400 block leading-tight">INÍCIO DA OBRA</span>
-        <span className="font-bold text-gray-800">{report.inicio || "-"}</span>
-      </div>
-      <div className="col-span-4 p-1 flex flex-col">
-        <span className="text-[7px] text-gray-400 block leading-tight">TÉRMINO DA OBRA</span>
-        <span className="font-bold text-gray-800">{report.termino || "-"}</span>
-      </div>
-      <div className="col-span-4 p-1 flex flex-col">
-        <span className="text-[7px] text-gray-400 block leading-tight">GERENCIADORA</span>
-        <span className="font-bold text-gray-800">{report.gerenciadora || "-"}</span>
-      </div>
-    </div>
-  );
-
-  return (
-    <div className="flex flex-col gap-6 print:gap-0 bg-transparent print:bg-white mb-6 print:mb-0">
-        
-        {/* ================= PAGE 1 ================= */}
-        <div className="bg-white border md:border-gray-300 p-4 md:p-8 flex flex-col w-full min-h-[1120px] print-page relative shadow-sm print:shadow-none print:border-none">
-          <PrintHeader />
-          <ReportInfoBlock />
-
-          {/* ACIDENTES vs EFETIVO SUMMARY */}
-          <div className="mt-3 grid grid-cols-2 gap-2">
-            {/* Acidentes Summary Table */}
-            <div className="border border-gray-300">
-              <div className="bg-[#004899]/5 font-bold text-[8px] text-[#004899] px-2 py-0.5 border-b border-gray-300 flex justify-between">
-                <span>ACIDENTES</span>
-                <span className="text-gray-400">(resumo)</span>
-              </div>
-              <div className="text-[8px] divide-y divide-gray-200">
-                <div className="flex justify-between p-1">
-                  <span>Acidentes com afastamento no dia</span>
-                  <span className="font-bold font-mono">{report.acidentes.comAfastamentoDia}</span>
-                </div>
-                <div className="flex justify-between p-1">
-                  <span>Acidentes com afastamento - ausentes no dia</span>
-                  <span className="font-bold font-mono">{report.acidentes.comAfastamentoAusentesDia}</span>
-                </div>
-                <div className="flex justify-between p-1">
-                  <span>Acidentes com afastamento - acumulado obra</span>
-                  <span className="font-bold font-mono">{report.acidentes.comAfastamentoAcumulado}</span>
-                </div>
-                <div className="flex justify-between p-1">
-                  <span>Acidentes sem afastamento no dia</span>
-                  <span className="font-bold font-mono">{report.acidentes.semAfastamentoDia}</span>
-                </div>
-                <div className="flex justify-between p-1">
-                  <span>Acidentes sem afastamento - acumulado obra</span>
-                  <span className="font-bold font-mono">{report.acidentes.semAfastamentoAcumulado}</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Efetivo Summary Table */}
-            <div className="border border-gray-300">
-              <div className="bg-[#004899]/5 font-bold text-[8px] text-[#004899] px-2 py-0.5 border-b border-gray-300 flex justify-between">
-                <span>EFETIVO</span>
-                <span className="text-gray-400">(resumo)</span>
-              </div>
-              <div className="text-[8px] divide-y divide-gray-200">
-                <div className="flex justify-between p-1">
-                  <span>Mão de Obra Indireta (MOI)</span>
-                  <span className="font-bold font-mono">{report.efetivoSummary.moi}</span>
-                </div>
-                <div className="flex justify-between p-1">
-                  <span>Mão de Obra Direta (MOD)</span>
-                  <span className="font-bold font-mono">{report.efetivoSummary.mod}</span>
-                </div>
-                <div className="flex justify-between p-1">
-                  <span>Subcontratados - MOI / MOD</span>
-                  <span className="font-bold font-mono">{report.efetivoSummary.subcontratadosMoiMod}</span>
-                </div>
-                <div className="flex justify-between p-1">
-                  <span>Afastados / Outros</span>
-                  <span className="font-bold font-mono">{report.efetivoSummary.afastados}</span>
-                </div>
-                <div className="flex justify-between p-1 bg-gray-50 font-bold border-t border-gray-300 leading-none py-1.5">
-                  <span className="text-[#004899]">EFETIVO TOTAL</span>
-                  <span className="font-mono text-[#004899]">{report.efetivoSummary.total}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* PARALISAÇÕES vs EQUIPAMENTOS SUMMARY */}
-          <div className="mt-2 grid grid-cols-2 gap-2">
-            {/* Paralisações Table */}
-            <div className="border border-gray-300">
-              <div className="bg-[#004899]/5 font-bold text-[8px] text-[#004899] px-2 py-0.5 border-b border-gray-300 flex justify-between">
-                <span>PARALISAÇÕES</span>
-                <span className="text-gray-400">(resumo)</span>
-              </div>
-              <div className="text-[8px] divide-y divide-gray-200">
-                <div className="flex justify-between p-1">
-                  <span>Acumulado de horas paralisadas no dia</span>
-                  <span className="font-bold font-mono">{report.paralisacoesSummary.totalHorasParalisadasDia}h</span>
-                </div>
-                <div className="flex justify-between p-1">
-                  <span>Número total de paralisações</span>
-                  <span className="font-bold font-mono">{report.paralisacoesSummary.numeroParalisacoes}</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Equipamentos Summary Table */}
-            <div className="border border-gray-300">
-              <div className="bg-[#004899]/5 font-bold text-[8px] text-[#004899] px-2 py-0.5 border-b border-gray-300 flex justify-between">
-                <span>EQUIPAMENTOS</span>
-                <span className="text-gray-400">(resumo)</span>
-              </div>
-              <div className="text-[8px] divide-y divide-gray-200">
-                <div className="flex justify-between p-1">
-                  <span>Equipamentos Próprios Mobilizados</span>
-                  <span className="font-bold font-mono">{report.equipamentosSummary.mobilizados}</span>
-                </div>
-                <div className="flex justify-between p-1">
-                  <span>Equipamentos Subcontratados</span>
-                  <span className="font-bold font-mono">{report.equipamentosSummary.subcontratadosMobilizados}</span>
-                </div>
-                <div className="flex justify-between p-1 bg-gray-50 font-bold border-t border-gray-300 leading-none py-1.5">
-                  <span className="text-[#004899]">EQUIPAMENTOS TOTAL</span>
-                  <span className="font-mono text-[#004899]">{report.equipamentosSummary.total}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* ACTIVE ACTIVITIES (First Block) */}
-          <div className="mt-3 flex-1 flex flex-col">
-            <h3 className="text-[9px] font-bold bg-[#004899] text-white py-1 px-2 uppercase tracking-wide">
-              ATIVIDADES EXECUTADAS NO PERÍODO — FASES DE CAMPO
-            </h3>
-
-            {report.atividades && report.atividades.length > 0 ? (
-              <div className="border border-gray-300 border-t-0 text-[8.5px]">
-                {/* We chunk or list the activities. On page 1 we print up to 4-5 activities, especially if they have images, avoiding page breaking */}
-                {report.atividades.slice(0, 5).map((act, idx) => (
-                  <div key={act.id || idx} className="border-b border-gray-200 p-2 last:border-b-0">
-                    <div className="flex items-start text-gray-400 text-[7.5px] uppercase font-bold tracking-tight mb-1">
-                      <span className="text-blue-700 bg-blue-50 px-1 py-0.5 rounded-sm mr-2">{act.ref}</span>
-                      <span>{act.fase}</span>
-                    </div>
-
-                    <div className="flex gap-4">
-                      <div className="w-20 font-mono text-gray-500 text-[8px] shrink-0">
-                        ID: {act.identificador}
-                      </div>
-                      <div className="flex-1 text-gray-800">
-                        {act.descricao}
-                      </div>
-                      <div className="w-24 text-right pr-2">
-                        <span className="text-gray-400">Total: </span>
-                        <span className="font-mono font-bold text-gray-800">{act.total} {act.intervalo}</span>
-                      </div>
-                    </div>
-
-                    {act.comentario && (
-                      <p className="mt-1.5 ml-2 text-[8px] text-[#004899] bg-[#004899]/5 px-2 py-0.5 rounded-sm">
-                        <span className="font-bold italic mr-1">COMENTÁRIO:</span>
-                        <FormattedText text={act.comentario} />
-                      </p>
-                    )}
-
-                    {/* Rendering images if applicable */}
-                    {act.imagens && act.imagens.length > 0 && (
-                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 mt-2.5 ml-2">
-                        {act.imagens.map((imgUrl, imgIdx) => (
-                          <div key={imgIdx} className="w-full max-w-[240px] aspect-[4/3] rounded border border-gray-200 overflow-hidden bg-gray-50 flex items-center justify-center">
-                            <img
-                              src={imgUrl}
-                              alt={`Imagem anexa ${imgIdx + 1}`}
-                              referrerPolicy="no-referrer"
-                              className="w-full h-full object-cover"
-                            />
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ))}
-
-                {report.atividades.length > 5 && (
-                  <p className="text-[7.5px] italic text-gray-400 p-1.5 text-center border-t border-gray-100 bg-gray-50">
-                    As demais atividades continuam na página 2 de planejamento.
-                  </p>
-                )}
-              </div>
-            ) : (
-              <div className="flex-1 border border-gray-300 border-t-0 flex items-center justify-center text-gray-400 text-[9px] italic py-8">
-                Nenhuma atividade cadastrada para este RDO.
-              </div>
-            )}
-          </div>
-
-          <PrintFooter pageNum={1} />
-        </div>
-
-        {/* ================= PAGE 2 ================= */}
-        <div className="bg-white border md:border-gray-300 p-4 md:p-8 flex flex-col w-full min-h-[1120px] print-page relative shadow-sm print:shadow-none print:border-none">
-          <PrintHeader />
-          
-          <div className="mt-2 text-[8.5px] flex flex-col flex-1 gap-2.5">
-            {/* CONTINUING ACTIVITIES (If any) */}
-            {report.atividades && report.atividades.length > 5 && (
-              <div>
-                <h4 className="text-[9px] font-bold bg-gray-800 text-white py-0.5 px-2 uppercase tracking-wide">
-                  Atividades - Planejamento & Outros (Continuação)
-                </h4>
-                <div className="border border-gray-300 border-t-0">
-                  {report.atividades.slice(5).map((act, idx) => (
-                    <div key={act.id || idx} className="border-b border-gray-200 p-1.5 last:border-b-0 flex gap-2">
-                      <div className="w-8 text-blue-700 font-bold">{act.ref}</div>
-                      <div className="w-24 text-gray-400 font-mono text-[8px]">{act.identificador}</div>
-                      <div className="flex-1 text-gray-800">{act.descricao}</div>
-                      <div className="w-24 text-right pr-2">
-                        <span className="font-mono">{act.total} {act.intervalo}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* FATOS RELEVANTES - ALTERAÇÃO DE ESCOPO CONTRATADO */}
+    if (activityChunks.length > 0) {
+      activityChunks.forEach((chunk, chunkIdx) => {
+        const startNum = 2 + (chunkIdx * 3);
+        pages.push(
+          <div key={`atividades-cont-${chunkIdx}`} className="flex flex-col gap-3 text-[8.5px]">
             <div>
               <h4 className="text-[9px] font-bold bg-[#004899] text-white py-0.5 px-2 uppercase tracking-wide">
-                FATOS RELEVANTES — OCORRÊNCIAS EXTRAORDINÁRIAS DO DIA
+                ATIVIDADES EXECUTADAS NO PERÍODO (CONTINUAÇÃO — PARTE {chunkIdx + 2})
               </h4>
-              <div className="border border-gray-300 p-2 min-h-12 bg-white">
-                {report.fatosRelevantes && report.fatosRelevantes.length > 0 ? (
-                  <ul className="list-disc pl-4 space-y-1">
-                    {report.fatosRelevantes.map((fato, fIdx) => (
-                      <li key={fIdx} className="text-gray-800 text-[8.5px]">{fato}</li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="text-gray-400 italic text-[8px] text-center">Nenhuma ocorrência extraordinária ou alteração de escopo anotada.</p>
-                )}
+
+              <div className="mt-1 border border-gray-300 divide-y divide-gray-200 bg-white p-1">
+                {chunk.map((act, idx) => renderActivityCard(act, startNum + idx))}
               </div>
             </div>
+          </div>
+        );
+      });
+    }
 
-            {/* PARALISAÇÕES - TIMETABLE GRID */}
-            <div>
-              <h4 className="text-[9px] font-bold bg-[#004899] text-white py-0.5 px-2 uppercase tracking-wide flex justify-between items-center">
-                <span>TABELA DETALHADA DE PARALISAÇÕES DO EFETIVO</span>
-                <span className="text-[8px] font-normal font-mono">Total no dia: {report.paralisacoesSummary.totalHorasParalisadasDia}h</span>
-              </h4>
+    if (report.fatosRelevantes && report.fatosRelevantes.length > 0) {
+      pages.push(
+        <div key="page-fatos-relevantes" className="flex flex-col gap-3 text-[8.5px]">
+          <div>
+            <h4 className="text-[9px] font-bold bg-[#004899] text-white py-0.5 px-2 uppercase tracking-wide">
+              FATOS RELEVANTES — OCORRÊNCIAS EXTRAORDINÁRIAS DO DIA
+            </h4>
+            <div className="mt-1 border border-gray-300 divide-y divide-gray-200 bg-white">
+              {report.fatosRelevantes.map((fato, idx) => (
+                <div key={idx} className="p-1.5 flex gap-1.5 items-start text-[8px] text-gray-800">
+                  <span className="font-bold text-[#004899]">{(idx + 1).toString().padStart(2, "0")}.</span>
+                  <div className="flex-1">
+                    <FormattedText text={fato} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+    }
+  }
 
-              {(() => {
-                const activeParalisacoes = Object.entries(report.paralisacoesDetalhe || {}).filter(([, rowVal]) => {
-                  const row = rowVal as StoppageDetailRow;
-                  if (!row) return false;
+  // PAGES FOR PARALISAÇÕES (CHUNKED INTO DEDICATED PAGES SO NO TABLE IS EVER CLIPPED)
+  const activeParalisacoes = Object.entries(report.paralisacoesDetalhe || {}).filter(([, rowVal]) => {
+    const row = rowVal as StoppageDetailRow;
+    if (!row) return false;
 
-                  // Se explicitamente desativado pelo usuário, nunca exibe
-                  if (row.ativo === false) return false;
+    if (row.ativo === false) return false;
+    if (row.ativo === true) return true;
 
-                  // Se explicitamente marcado pelo usuário, exibe
-                  if (row.ativo === true) return true;
+    const rowAny = row as any;
+    const hasHours = Boolean(row.horas && row.horas.length > 0);
+    const hasComment = Boolean(row.comentarios && row.comentarios.trim());
+    const hasFrentesItems = Boolean(row.frentesItems && row.frentesItems.length > 0);
+    const hasLaborItems = Boolean(rowAny.laborItems && rowAny.laborItems.length > 0);
+    const hasEquipItems = Boolean(rowAny.equipItems && rowAny.equipItems.length > 0);
+    const hasCustomFrentes = Boolean(row.frentes && row.frentes.trim() && row.frentes !== "Todas as frentes");
+    const hasTotal = Boolean(row.total && row.total !== "0h" && row.total !== "0");
 
-                  // Para dados legados onde 'ativo' não foi definido explicitamente:
-                  const rowAny = row as any;
-                  const hasHours = Boolean(row.horas && row.horas.length > 0);
-                  const hasComment = Boolean(row.comentarios && row.comentarios.trim());
-                  const hasFrentesItems = Boolean(row.frentesItems && row.frentesItems.length > 0);
-                  const hasLaborItems = Boolean(rowAny.laborItems && rowAny.laborItems.length > 0);
-                  const hasEquipItems = Boolean(rowAny.equipItems && rowAny.equipItems.length > 0);
-                  const hasCustomFrentes = Boolean(row.frentes && row.frentes.trim() && row.frentes !== "Todas as frentes");
-                  const hasTotal = Boolean(row.total && row.total !== "0h" && row.total !== "0");
+    return hasHours || hasComment || hasFrentesItems || hasLaborItems || hasEquipItems || hasCustomFrentes || hasTotal;
+  });
 
-                  return hasHours || hasComment || hasFrentesItems || hasLaborItems || hasEquipItems || hasCustomFrentes || hasTotal;
-                });
+  if (activeParalisacoes.length > 0) {
+    activeParalisacoes.forEach(([catKey, rowVal]) => {
+      const row = rowVal as StoppageDetailRow;
+      const catLabel = getCategoryLabel(catKey);
 
-                if (activeParalisacoes.length === 0) {
-                  return (
-                    <div className="border border-gray-300 p-2 text-center text-gray-500 italic text-[8px] bg-white">
-                      Sem paralisações ou inoperâncias de efetivo/equipamentos registradas neste RDO.
-                    </div>
-                  );
-                }
+      const frentesList = (row.frentesItems && row.frentesItems.length > 0)
+        ? row.frentesItems
+        : row.frentes && row.frentes.trim()
+          ? [{ id: 'f-init-' + catKey, nome: row.frentes }]
+          : [];
 
-                return (
-                  <div className="border border-gray-300 divide-y divide-gray-300">
-                    {activeParalisacoes.map(([catKey, rowVal]) => {
-                      const row = rowVal as StoppageDetailRow;
-                      const catLabel = getCategoryLabel(catKey);
+      // Chunk frentes in groups of 2 if frentesList > 2 to guarantee everything fits without overflow
+      const frentesChunks = frentesList.length > 2
+        ? Array.from({ length: Math.ceil(frentesList.length / 2) }, (_, i) => frentesList.slice(i * 2, i * 2 + 2))
+        : [frentesList];
 
-                      const frentesList = (row.frentesItems && row.frentesItems.length > 0)
-                        ? row.frentesItems
-                        : row.frentes && row.frentes.trim()
-                          ? [{ id: 'f-init-' + catKey, nome: row.frentes }]
-                          : [];
+      frentesChunks.forEach((frenteChunk, chunkIdx) => {
+        pages.push(
+          <div key={`stoppage-${catKey}-${chunkIdx}`} className="flex flex-col gap-2.5 text-[8.5px]">
+            <h4 className="text-[9px] font-bold bg-[#004899] text-white py-0.5 px-2 uppercase tracking-wide flex justify-between items-center">
+              <span>TABELA DETALHADA DE PARALISAÇÕES DO EFETIVO {frentesChunks.length > 1 ? `(PARTE ${chunkIdx + 1})` : ''}</span>
+              <span className="text-[8px] font-normal font-mono">Total no dia: {report.paralisacoesSummary.totalHorasParalisadasDia}h</span>
+            </h4>
+
+            <div className="border border-gray-300 p-2 space-y-2 bg-white">
+              {/* Category Banner */}
+              <div className="bg-slate-50 p-2 rounded border border-slate-200 space-y-1.5">
+                <div className="flex items-center justify-between border-b border-slate-200 pb-1">
+                  <span className="font-bold text-[8.5px] uppercase text-[#004899] tracking-tight">
+                    Paralisação por: <span className="font-extrabold text-blue-900">{catLabel}</span>
+                  </span>
+                  <span className="font-mono font-bold text-[8.5px] text-red-700 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded">
+                    Duração Total: {row.total || "0h"}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-2 text-[8px]">
+                  <span className="font-bold text-gray-700 uppercase shrink-0">Janela de Horas Paralisadas:</span>
+                  <div className="flex flex-wrap gap-1">
+                    {row.horas && row.horas.length > 0 ? (
+                      row.horas.map(h => (
+                        <span key={h} className="bg-red-50 text-red-700 border border-red-200 font-mono font-bold px-1.5 py-0.2 rounded text-[7.5px]">
+                          {h}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="text-gray-400 italic text-[7.5px]">Sem janela de horário informada</span>
+                    )}
+                  </div>
+                </div>
+
+                {row.comentarios && row.comentarios.trim() !== "" && (
+                  <div className="text-[7.5px] bg-blue-50/70 border border-blue-200/80 p-1.5 rounded text-blue-900 leading-tight">
+                    <span className="font-bold uppercase text-blue-950 mr-1">Nota Explicativa:</span>
+                    <FormattedText text={row.comentarios} />
+                  </div>
+                )}
+              </div>
+
+              {/* Frentes */}
+              <div>
+                <span className="block text-[8px] font-bold text-gray-700 uppercase tracking-wide mb-1">
+                  Frentes de Trabalho, Mão de Obra e Equipamentos Parados:
+                </span>
+
+                {frenteChunk.length > 0 ? (
+                  <div className="space-y-2">
+                    {frenteChunk.map((f, fi) => {
+                      const laborItems = (f.maoDeObraDescs || []).map(parseItemQty);
+                      const equipItems = (f.equipamentoDescs || []).map(parseItemQty);
 
                       return (
-                        <div key={catKey} className="p-2 space-y-2 bg-white">
-                          {/* PARTE SUPERIOR: Categoria, Janela de Horas e Nota Explicativa */}
-                          <div className="bg-slate-50 p-2 rounded border border-slate-200 space-y-1.5">
-                            <div className="flex items-center justify-between border-b border-slate-200 pb-1">
-                              <span className="font-bold text-[8.5px] uppercase text-[#004899] tracking-tight">
-                                Paralisação por: <span className="font-extrabold text-blue-900">{catLabel}</span>
+                        <div key={f.id || fi} className="border border-gray-200 rounded text-[7.5px] bg-white overflow-hidden">
+                          {/* Header da Frente */}
+                          <div className="bg-gray-100 px-2 py-1 font-bold text-gray-800 border-b border-gray-200 flex flex-wrap justify-between items-center gap-1">
+                            <span>• {f.nome || "Frente de trabalho"}</span>
+                            {f.pqItemDesc && (
+                              <span className="text-[7px] text-[#004899] font-mono font-normal">
+                                Planilha PQ: {f.pqItemDesc}
                               </span>
-                              <span className="font-mono font-bold text-[8.5px] text-red-700 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded">
-                                Duração Total: {row.total || "0h"}
-                              </span>
-                            </div>
-
-                            <div className="flex items-center gap-2 text-[8px]">
-                              <span className="font-bold text-gray-700 uppercase shrink-0">Janela de Horas Paralisadas:</span>
-                              <div className="flex flex-wrap gap-1">
-                                {row.horas && row.horas.length > 0 ? (
-                                  row.horas.map(h => (
-                                    <span key={h} className="bg-red-50 text-red-700 border border-red-200 font-mono font-bold px-1.5 py-0.2 rounded text-[7.5px]">
-                                      {h}
-                                    </span>
-                                  ))
-                                ) : (
-                                  <span className="text-gray-400 italic text-[7.5px]">Sem janela de horário informada</span>
-                                )}
-                              </div>
-                            </div>
-
-                            {row.comentarios && row.comentarios.trim() !== "" && (
-                              <div className="text-[7.5px] bg-blue-50/70 border border-blue-200/80 p-1.5 rounded text-blue-900 leading-tight">
-                                <span className="font-bold uppercase text-blue-950 mr-1">Nota Explicativa:</span>
-                                <FormattedText text={row.comentarios} />
-                              </div>
                             )}
                           </div>
 
-                          {/* PARTE INFERIOR: FRENTES, MÃO DE OBRA E EQUIPAMENTOS PARADOS */}
-                          <div>
-                            <span className="block text-[8px] font-bold text-gray-700 uppercase tracking-wide mb-1">
-                              Frentes de Trabalho, Mão de Obra e Equipamentos Parados:
-                            </span>
-
-                            {frentesList.length > 0 ? (
-                              <div className="space-y-1.5">
-                                {frentesList.map((f, fi) => {
-                                  const laborItems = (f.maoDeObraDescs || []).map(parseItemQty);
-                                  const equipItems = (f.equipamentoDescs || []).map(parseItemQty);
-
-                                  return (
-                                    <div key={f.id || fi} className="border border-gray-200 rounded text-[7.5px] bg-white overflow-hidden">
-                                      {/* Header da Frente */}
-                                      <div className="bg-gray-100 px-2 py-1 font-bold text-gray-800 border-b border-gray-200 flex flex-wrap justify-between items-center gap-1">
-                                        <span>• {f.nome || "Frente de trabalho"}</span>
-                                        {f.pqItemDesc && (
-                                          <span className="text-[7px] text-[#004899] font-mono font-normal">
-                                            Planilha PQ: {f.pqItemDesc}
-                                          </span>
-                                        )}
-                                      </div>
-
-                                      {/* Tabela de Insumos */}
-                                      <div className="p-1.5 space-y-1.5">
-                                        {/* Mão de Obra Parada */}
-                                        {laborItems.length > 0 ? (
-                                          <div>
-                                            <span className="block font-bold text-amber-900 text-[7px] uppercase mb-0.5">
-                                              Mão de Obra Parada:
-                                            </span>
-                                            <table className="w-full text-left border-collapse border border-amber-200/80">
-                                              <thead>
-                                                <tr className="bg-amber-50 text-amber-950 font-bold text-[7px] border-b border-amber-200/80">
-                                                  <th className="p-1 border-r border-amber-200/80">Cargo / Função</th>
-                                                  <th className="p-1 w-24 text-center">Quantidade Parada</th>
-                                                </tr>
-                                              </thead>
-                                              <tbody className="divide-y divide-amber-100 text-gray-800">
-                                                {laborItems.map((itm, lIdx) => (
-                                                  <tr key={lIdx} className="hover:bg-amber-50/30">
-                                                    <td className="p-1 border-r border-amber-200/60 font-medium">{itm.desc}</td>
-                                                    <td className="p-1 text-center font-bold font-mono text-amber-950">{itm.qtd} colabs</td>
-                                                  </tr>
-                                                ))}
-                                              </tbody>
-                                            </table>
-                                          </div>
-                                        ) : (
-                                          <span className="text-gray-400 italic text-[7px] block">Sem especificação de mão de obra parada para esta frente.</span>
-                                        )}
-
-                                        {/* Equipamentos Parados */}
-                                        {equipItems.length > 0 && (
-                                          <div>
-                                            <span className="block font-bold text-sky-900 text-[7px] uppercase mb-0.5">
-                                              Equipamentos Parados:
-                                            </span>
-                                            <table className="w-full text-left border-collapse border border-sky-200/80">
-                                              <thead>
-                                                <tr className="bg-sky-50 text-sky-950 font-bold text-[7px] border-b border-sky-200/80">
-                                                  <th className="p-1 border-r border-sky-200/80">Equipamento</th>
-                                                  <th className="p-1 w-24 text-center">Quantidade Parada</th>
-                                                </tr>
-                                              </thead>
-                                              <tbody className="divide-y divide-sky-100 text-gray-800">
-                                                {equipItems.map((itm, eIdx) => (
-                                                  <tr key={eIdx} className="hover:bg-sky-50/30">
-                                                    <td className="p-1 border-r border-sky-200/60 font-medium">{itm.desc}</td>
-                                                    <td className="p-1 text-center font-bold font-mono text-sky-950">{itm.qtd} un</td>
-                                                  </tr>
-                                                ))}
-                                              </tbody>
-                                            </table>
-                                          </div>
-                                        )}
-                                      </div>
-                                    </div>
-                                  );
-                                })}
+                          {/* Tabela de Insumos */}
+                          <div className="p-1.5 space-y-1.5">
+                            {/* Mão de Obra Parada */}
+                            {laborItems.length > 0 ? (
+                              <div>
+                                <span className="block font-bold text-amber-900 text-[7px] uppercase mb-0.5">
+                                  Mão de Obra Parada:
+                                </span>
+                                <table className="w-full text-left border-collapse border border-amber-200/80">
+                                  <thead>
+                                    <tr className="bg-amber-50 text-amber-950 font-bold text-[7px] border-b border-amber-200/80">
+                                      <th className="p-1 border-r border-amber-200/80">Cargo / Função</th>
+                                      <th className="p-1 w-24 text-center">Quantidade Parada</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-amber-100 text-gray-800">
+                                    {laborItems.map((itm, lIdx) => (
+                                      <tr key={lIdx} className="hover:bg-amber-50/30">
+                                        <td className="p-1 border-r border-amber-200/60 font-medium">{itm.desc}</td>
+                                        <td className="p-1 text-center font-bold font-mono text-amber-950">{itm.qtd} colabs</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
                               </div>
                             ) : (
-                              <div className="text-gray-400 italic text-[7.5px] p-1 bg-gray-50 rounded border border-gray-200">
-                                Todas as frentes de trabalho afetadas.
+                              <span className="text-gray-400 italic text-[7px] block">Sem especificação de mão de obra parada para esta frente.</span>
+                            )}
+
+                            {/* Equipamentos Parados */}
+                            {equipItems.length > 0 && (
+                              <div>
+                                <span className="block font-bold text-sky-900 text-[7px] uppercase mb-0.5">
+                                  Equipamentos Parados:
+                                </span>
+                                <table className="w-full text-left border-collapse border border-sky-200/80">
+                                  <thead>
+                                    <tr className="bg-sky-50 text-sky-950 font-bold text-[7px] border-b border-sky-200/80">
+                                      <th className="p-1 border-r border-sky-200/80">Equipamento</th>
+                                      <th className="p-1 w-24 text-center">Quantidade Parada</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-sky-100 text-gray-800">
+                                    {equipItems.map((itm, eIdx) => (
+                                      <tr key={eIdx} className="hover:bg-sky-50/30">
+                                        <td className="p-1 border-r border-sky-200/60 font-medium">{itm.desc}</td>
+                                        <td className="p-1 text-center font-bold font-mono text-sky-950">{itm.qtd} un</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
                               </div>
                             )}
                           </div>
@@ -776,250 +782,325 @@ const SingleReportPrint: React.FC<{ report: RdoReport }> = ({ report }) => {
                       );
                     })}
                   </div>
-                );
-              })()}
-            </div>
-
-            {/* ACCIDENTS EXTENDED NOTE */}
-            <div className="border border-gray-300 p-1 flex justify-between bg-yellow-50/20 text-[7.5px]">
-              <span className="font-bold text-gray-600 uppercase">INFORMAÇÕES DE SEGURANÇA (ACIDENTES):</span>
-              <span className="font-bold text-emerald-700 italic">
-                {report.acidentes.comAfastamentoDia === 0 && report.acidentes.semAfastamentoDia === 0 
-                  ? "NENHUMA OCORRÊNCIA DE ACIDENTE JUNTADA NESTE RDO DO DIA." 
-                  : "OCORRÊNCIA DE ACIDENTE REGISTRADA NO SISTEMA."}
-              </span>
-            </div>
-
-            {/* CLIMATIC CONDITIONS & RAINFALL DETAILS */}
-            <div>
-              <h4 className="text-[9px] font-bold bg-[#004899] text-white py-0.5 px-2 uppercase tracking-wide">
-                CONDIÇÕES CLIMÁTICAS & ÍNDICE PLUVIOMÉTRICO (CHUVA MM)
-              </h4>
-              
-              {/* Rain summarizes text row */}
-              <div className="mt-1 border border-gray-300 p-1.5 grid grid-cols-6 gap-2 text-[8px] text-gray-600 bg-white leading-tight">
-                <div>Manhã: <strong className="text-gray-800 font-mono">{report.precipitacao.manha} mm</strong></div>
-                <div>Tarde: <strong className="text-gray-800 font-mono">{report.precipitacao.tarde} mm</strong></div>
-                <div>Noite: <strong className="text-gray-800 font-mono">{report.precipitacao.noite} mm</strong></div>
-                <div>Total Período: <strong className="text-blue-700 font-mono">{report.precipitacao.total} mm</strong></div>
-                <div>Acumulado Mês: <strong className="text-gray-800 font-mono">{report.precipitacao.acumuladoMes} mm</strong></div>
-                <div>Mês Anterior: <strong className="text-gray-800 font-mono">{report.precipitacao.acumuladoMesAnterior} mm</strong></div>
-              </div>
-
-              {/* Vector Rainfall charts */}
-              <div className="mt-2 grid grid-cols-1 gap-2">
-                <div className="bg-white border border-gray-200 rounded p-1">
-                  <p className="text-[7.5px] uppercase font-bold text-gray-400 text-center mb-1">CÁLCULO E ANÁLISE DE CHUVA - DIÁRIO ACUMULADO NO MÊS</p>
-                  <RainChart labels={monthlyRainLabels} values={monthlyRainValues} />
-                </div>
-                <div className="bg-white border border-gray-200 rounded p-1">
-                  <p className="text-[7.5px] uppercase font-bold text-gray-400 text-center mb-1">CÁLCULO E ANÁLISE DE CHUVA - MENSAL ACUMULADO NO ANO</p>
-                  <RainChart labels={yearlyRainLabels} values={yearlyRainValues} />
-                </div>
+                ) : (
+                  <div className="text-gray-400 italic text-[7.5px] p-1 bg-gray-50 rounded border border-gray-200">
+                    Todas as frentes de trabalho afetadas.
+                  </div>
+                )}
               </div>
             </div>
           </div>
+        );
+      });
+    });
+  }
 
-          <PrintFooter pageNum={2} />
+  // PAGE FOR CLIMATE & RAIN CHARTS
+  pages.push(
+    <div key="page-climate" className="flex flex-col gap-2.5 text-[8.5px]">
+      <h4 className="text-[9px] font-bold bg-[#004899] text-white py-0.5 px-2 uppercase tracking-wide">
+        CONDIÇÕES CLIMÁTICAS & ÍNDICE PLUVIOMÉTRICO (CHUVA MM)
+      </h4>
+      
+      {/* Rain summarizes text row */}
+      <div className="border border-gray-300 p-1.5 grid grid-cols-6 gap-2 text-[8px] text-gray-600 bg-white leading-tight">
+        <div>Manhã: <strong className="text-gray-800 font-mono">{report.precipitacao.manha} mm</strong></div>
+        <div>Tarde: <strong className="text-gray-800 font-mono">{report.precipitacao.tarde} mm</strong></div>
+        <div>Noite: <strong className="text-gray-800 font-mono">{report.precipitacao.noite} mm</strong></div>
+        <div>Total Período: <strong className="text-blue-700 font-mono">{report.precipitacao.total} mm</strong></div>
+        <div>Acumulado Mês: <strong className="text-gray-800 font-mono">{report.precipitacao.acumuladoMes} mm</strong></div>
+        <div>Mês Anterior: <strong className="text-gray-800 font-mono">{report.precipitacao.acumuladoMesAnterior} mm</strong></div>
+      </div>
+
+      {/* Vector Rainfall charts */}
+      <div className="grid grid-cols-1 gap-2">
+        <div className="bg-white border border-gray-200 rounded p-1">
+          <p className="text-[7.5px] uppercase font-bold text-gray-400 text-center mb-1">CÁLCULO E ANÁLISE DE CHUVA - DIÁRIO ACUMULADO NO MÊS</p>
+          <RainChart labels={monthlyRainLabels} values={monthlyRainValues} />
         </div>
+        <div className="bg-white border border-gray-200 rounded p-1">
+          <p className="text-[7.5px] uppercase font-bold text-gray-400 text-center mb-1">CÁLCULO E ANÁLISE DE CHUVA - MENSAL ACUMULADO NO ANO</p>
+          <RainChart labels={yearlyRainLabels} values={yearlyRainValues} />
+        </div>
+      </div>
 
-        {/* ================= PAGE 3 ================= */}
-        <div className="bg-white border md:border-gray-300 p-4 md:p-8 flex flex-col w-full min-h-[1120px] print-page relative shadow-sm print:shadow-none print:border-none">
-          <PrintHeader />
+      {/* ACCIDENTS EXTENDED NOTE */}
+      <div className="border border-gray-300 p-1 flex justify-between bg-yellow-50/20 text-[7.5px] mt-1">
+        <span className="font-bold text-gray-600 uppercase">INFORMAÇÕES DE SEGURANÇA (ACIDENTES):</span>
+        <span className="font-bold text-emerald-700 italic">
+          {report.acidentes.comAfastamentoDia === 0 && report.acidentes.semAfastamentoDia === 0 
+            ? "NENHUMA OCORRÊNCIA DE ACIDENTE JUNTADA NESTE RDO DO DIA." 
+            : "OCORRÊNCIA DE ACIDENTE REGISTRADA NO SISTEMA."}
+        </span>
+      </div>
+    </div>
+  );
 
-          <div className="mt-2 text-[8.5px] flex flex-col flex-1 gap-3.5">
-            {/* EFETIVO - QUADRO DETALHADO */}
-            <div>
-              <h4 className="text-[9px] font-bold bg-[#004899] text-white py-0.5 px-2 uppercase tracking-wide">
-                EFETIVO - QUADRO DETALHADO DO PESSOAL DE CAMPO
-              </h4>
-              <p className="text-[6.5px] text-gray-400 italic mb-1 uppercase tracking-tight">Legenda: C - Cadastrados em Folha; F - Faltas no dia; A - Atestados Médicos; T - Total Geral Presente</p>
+  // PAGE FOR EFETIVO & EQUIPAMENTOS MOBILIZADOS
+  pages.push(
+    <div key="page-efetivo-equip" className="flex flex-col gap-3 text-[8.5px]">
+      {/* EFETIVO - QUADRO DETALHADO */}
+      <div>
+        <h4 className="text-[9px] font-bold bg-[#004899] text-white py-0.5 px-2 uppercase tracking-wide">
+          EFETIVO - QUADRO DETALHADO DO PESSOAL DE CAMPO
+        </h4>
+        <p className="text-[6.5px] text-gray-400 italic mb-1 uppercase tracking-tight">Legenda: C - Cadastrados em Folha; F - Faltas no dia; A - Atestados Médicos; T - Total Geral Presente</p>
 
-              <div className="space-y-2 border border-gray-300 p-1 bg-gray-50/50">
-                {report.efetivoDetalhado && report.efetivoDetalhado.length > 0 ? (
-                  report.efetivoDetalhado.map((group) => {
-                    // Calc group totals
-                    const totalC = group.items.reduce((sum, item) => sum + (item.c || 0), 0);
-                    const totalF = group.items.reduce((sum, item) => sum + (item.f || 0), 0);
-                    const totalA = group.items.reduce((sum, item) => sum + (item.a || 0), 0);
-                    const totalT = group.items.reduce((sum, item) => sum + (item.t || 0), 0);
+        <div className="space-y-2 border border-gray-300 p-1 bg-gray-50/50">
+          {report.efetivoDetalhado && report.efetivoDetalhado.length > 0 ? (
+            report.efetivoDetalhado.map((group) => {
+              const totalC = group.items.reduce((sum, item) => sum + (item.c || 0), 0);
+              const totalF = group.items.reduce((sum, item) => sum + (item.f || 0), 0);
+              const totalA = group.items.reduce((sum, item) => sum + (item.a || 0), 0);
+              const totalT = group.items.reduce((sum, item) => sum + (item.t || 0), 0);
 
-                    return (
-                      <div key={group.id} className="bg-white border border-gray-200">
-                        <div className="bg-[#004899]/10 p-1 flex justify-between font-bold text-xs text-[#004899]">
-                          <span>{group.nome}</span>
-                          <span className="text-[8px] bg-[#004899] text-white px-1 py-0.5 rounded uppercase">Grupo de Efetivo</span>
-                        </div>
-                        
-                        <table className="w-full text-left font-sans text-[8px] border-collapse">
-                          <thead>
-                            <tr className="bg-gray-100 border-b border-gray-200 text-gray-500 font-semibold">
-                              <th className="p-1 border-r border-gray-200">CARGO / FUNÇÃO</th>
-                              <th className="p-1 border-r border-gray-200 w-16 text-center">TIPO</th>
-                              <th className="p-1 border-r border-gray-200 w-12 text-center">C</th>
-                              <th className="p-1 border-r border-gray-200 w-12 text-center">F</th>
-                              <th className="p-1 border-r border-gray-200 w-12 text-center">A</th>
-                              <th className="p-1 w-12 text-center bg-gray-50">T</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-gray-100">
-                            {group.items.map((item) => (
-                              <tr key={item.id} className="hover:bg-slate-50">
-                                <td className="p-1 border-r border-gray-200 font-medium text-gray-800">{item.cargo}</td>
-                                <td className="p-1 border-r border-gray-200 text-center font-mono text-gray-500">{item.moiMod}</td>
-                                <td className="p-1 border-r border-gray-200 text-center font-mono text-gray-700">{item.c}</td>
-                                <td className="p-1 border-r border-gray-200 text-center font-mono text-gray-700">{item.f}</td>
-                                <td className="p-1 border-r border-gray-200 text-center font-mono text-gray-700">{item.a}</td>
-                                <td className="p-1 text-center font-mono font-bold bg-gray-50 text-gray-800">{item.t}</td>
-                              </tr>
-                            ))}
-                            {/* Company Subtotals */}
-                            <tr className="bg-gray-50/70 border-t border-gray-300 font-bold">
-                              <td className="p-1 border-r border-gray-200 text-right pr-2 uppercase">TOTAL {group.nome}</td>
-                              <td className="p-1 border-r border-gray-200"></td>
-                              <td className="p-1 border-r border-gray-200 text-center font-mono">{totalC}</td>
-                              <td className="p-1 border-r border-gray-200 text-center font-mono">{totalF}</td>
-                              <td className="p-1 border-r border-gray-200 text-center font-mono">{totalA}</td>
-                              <td className="p-1 text-center font-mono text-blue-900 bg-blue-50">{totalT}</td>
-                            </tr>
-                          </tbody>
-                        </table>
-                      </div>
-                    );
-                  })
-                ) : (
-                  <p className="text-gray-400 italic text-[8px] text-center p-3">Nenhum trabalhador detalhado no quadro de efetivo.</p>
-                )}
-              </div>
-            </div>
-
-            {/* EQUIPAMENTOS MOBILIZADOS DETAIL */}
-            <div>
-              <h4 className="text-[9px] font-bold bg-[#004899] text-white py-0.5 px-2 uppercase tracking-wide">
-                EQUIPAMENTOS MOBILIZADOS — DETALHAMENTO DE EQUIPAMENTO MECÂNICO
-              </h4>
-              <div className="border border-gray-300">
-                <table className="w-full text-left font-sans text-[8px] border-collapse">
-                  <thead>
-                    <tr className="bg-gray-100 border-b border-gray-300 text-gray-500 font-bold uppercase text-[7.5px]">
-                      <th className="p-1 px-2 border-r border-gray-200 w-16 text-center">Ref</th>
-                      <th className="p-1 border-r border-gray-200">DESCRIÇÃO DO EQUIPAMENTO</th>
-                      <th className="p-1 border-r border-gray-200 w-32">EMPRESA RESPONSÁVEL / PROPRIEDADE</th>
-                      <th className="p-1 w-24 text-center">QTD MOBILIZADA</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-200 bg-white">
-                    {report.equipamentosDetalhado && report.equipamentosDetalhado.length > 0 ? (
-                      report.equipamentosDetalhado.map((eq, eIdx) => (
-                        <tr key={eq.id || eIdx} className="hover:bg-slate-50">
-                          <td className="p-1 text-center border-r border-gray-200 text-gray-400 font-mono">
-                            {(eIdx + 1).toString().padStart(2, "0")}
-                          </td>
-                          <td className="p-1 px-2 border-r border-gray-200 font-medium text-gray-800">{eq.descricao}</td>
-                          <td className="p-1 border-r border-gray-200 text-gray-600">{eq.empresa}</td>
-                          <td className="p-1 text-center font-bold font-mono text-gray-800">{eq.quantidade}</td>
-                        </tr>
-                      ))
-                    ) : (
-                      <tr>
-                        <td colSpan={4} className="p-3 text-center text-gray-400 italic">Nenhum equipamento mecânico cadastrado no dia.</td>
+              return (
+                <div key={group.id} className="bg-white border border-gray-200">
+                  <div className="bg-[#004899]/10 p-1 flex justify-between font-bold text-xs text-[#004899]">
+                    <span>{group.nome}</span>
+                    <span className="text-[8px] bg-[#004899] text-white px-1 py-0.5 rounded uppercase">Grupo de Efetivo</span>
+                  </div>
+                  
+                  <table className="w-full text-left font-sans text-[8px] border-collapse">
+                    <thead>
+                      <tr className="bg-gray-100 border-b border-gray-200 text-gray-500 font-semibold">
+                        <th className="p-1 border-r border-gray-200">CARGO / FUNÇÃO</th>
+                        <th className="p-1 border-r border-gray-200 w-16 text-center">TIPO</th>
+                        <th className="p-1 border-r border-gray-200 w-12 text-center">C</th>
+                        <th className="p-1 border-r border-gray-200 w-12 text-center">F</th>
+                        <th className="p-1 border-r border-gray-200 w-12 text-center">A</th>
+                        <th className="p-1 w-12 text-center bg-gray-50">T</th>
                       </tr>
-                    )}
-                    {/* Total Row */}
-                    <tr className="bg-gray-50 font-bold text-gray-800 border-t border-gray-300">
-                      <td className="p-1 border-r border-gray-200"></td>
-                      <td className="p-1 px-2 border-r border-gray-200 text-right uppercase text-[7.5px]">TOTAL EQUIPAMENTOS MOBILIZADOS</td>
-                      <td className="p-1 border-r border-gray-200"></td>
-                      <td className="p-1 text-center font-mono text-blue-900 bg-blue-50/50">
-                        {report.equipamentosDetalhado.reduce((sum, eq) => sum + (eq.quantidade || 0), 0)}
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </div>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {group.items.map((item) => (
+                        <tr key={item.id} className="hover:bg-slate-50">
+                          <td className="p-1 border-r border-gray-200 font-medium text-gray-800">{item.cargo}</td>
+                          <td className="p-1 border-r border-gray-200 text-center font-mono text-gray-500">{item.moiMod}</td>
+                          <td className="p-1 border-r border-gray-200 text-center font-mono text-gray-700">{item.c}</td>
+                          <td className="p-1 border-r border-gray-200 text-center font-mono text-gray-700">{item.f}</td>
+                          <td className="p-1 border-r border-gray-200 text-center font-mono text-gray-700">{item.a}</td>
+                          <td className="p-1 text-center font-mono font-bold bg-gray-50 text-gray-800">{item.t}</td>
+                        </tr>
+                      ))}
+                      <tr className="bg-gray-50/70 border-t border-gray-300 font-bold">
+                        <td className="p-1 border-r border-gray-200 text-right pr-2 uppercase">TOTAL {group.nome}</td>
+                        <td className="p-1 border-r border-gray-200"></td>
+                        <td className="p-1 border-r border-gray-200 text-center font-mono">{totalC}</td>
+                        <td className="p-1 border-r border-gray-200 text-center font-mono">{totalF}</td>
+                        <td className="p-1 border-r border-gray-200 text-center font-mono">{totalA}</td>
+                        <td className="p-1 text-center font-mono text-blue-900 bg-blue-50">{totalT}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              );
+            })
+          ) : (
+            <p className="text-gray-400 italic text-[8px] text-center p-3">Nenhum trabalhador detalhado no quadro de efetivo.</p>
+          )}
+        </div>
+      </div>
 
-            {/* COMENTÁRIO GERENCIADORA / CONTRATANTE */}
-            <div>
-              <h4 className="text-[9px] font-bold bg-[#004899] text-white py-0.5 px-2 uppercase tracking-wide">
-                COMENTÁRIO DA FISCALIZAÇÃO / GERENCIADORA / CONTRATANTE
-              </h4>
-              <div className="border border-gray-300 p-2 min-h-14 bg-white flex flex-col gap-1 text-[8.5px]">
-                {report.comentariosGerenciadoraContratante && report.comentariosGerenciadoraContratante.length > 0 ? (
-                  report.comentariosGerenciadoraContratante.map((comm, idx) => (
-                    <div key={idx} className="flex gap-1 items-start text-gray-700 leading-tight">
-                      <span className="text-[#004899] font-bold">{(idx + 1).toString().padStart(3, "0")} -</span>
-                      <p className="flex-1 italic">{comm}</p>
-                    </div>
-                  ))
-                ) : (
-                  <p className="text-gray-400 italic text-[8px] text-center my-auto">Nenhum comentário adicionado pela fiscalização contratante.</p>
-                )}
-              </div>
-            </div>
+      {/* EQUIPAMENTOS MOBILIZADOS DETAIL */}
+      <div>
+        <h4 className="text-[9px] font-bold bg-[#004899] text-white py-0.5 px-2 uppercase tracking-wide">
+          EQUIPAMENTOS MOBILIZADOS — DETALHAMENTO DE EQUIPAMENTO MECÂNICO
+        </h4>
+        <div className="border border-gray-300">
+          <table className="w-full text-left font-sans text-[8px] border-collapse">
+            <thead>
+              <tr className="bg-gray-100 border-b border-gray-300 text-gray-500 font-bold uppercase text-[7.5px]">
+                <th className="p-1 px-2 border-r border-gray-200 w-16 text-center">Ref</th>
+                <th className="p-1 border-r border-gray-200">DESCRIÇÃO DO EQUIPAMENTO</th>
+                <th className="p-1 border-r border-gray-200 w-32">EMPRESA RESPONSÁVEL / PROPRIEDADE</th>
+                <th className="p-1 w-24 text-center">QTD MOBILIZADA</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200 bg-white">
+              {report.equipamentosDetalhado && report.equipamentosDetalhado.length > 0 ? (
+                report.equipamentosDetalhado.map((eq, eIdx) => (
+                  <tr key={eq.id || eIdx} className="hover:bg-slate-50">
+                    <td className="p-1 text-center border-r border-gray-200 text-gray-400 font-mono">
+                      {(eIdx + 1).toString().padStart(2, "0")}
+                    </td>
+                    <td className="p-1 px-2 border-r border-gray-200 font-medium text-gray-800">{eq.descricao}</td>
+                    <td className="p-1 border-r border-gray-200 text-gray-600">{eq.empresa}</td>
+                    <td className="p-1 text-center font-bold font-mono text-gray-800">{eq.quantidade}</td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={4} className="p-3 text-center text-gray-400 italic">Nenhum equipamento mecânico cadastrado no dia.</td>
+                </tr>
+              )}
+              <tr className="bg-gray-50 font-bold text-gray-800 border-t border-gray-300">
+                <td className="p-1 border-r border-gray-200"></td>
+                <td className="p-1 px-2 border-r border-gray-200 text-right uppercase text-[7.5px]">TOTAL EQUIPAMENTOS MOBILIZADOS</td>
+                <td className="p-1 border-r border-gray-200"></td>
+                <td className="p-1 text-center font-mono text-blue-900 bg-blue-50/50">
+                  {report.equipamentosDetalhado ? report.equipamentosDetalhado.reduce((sum, eq) => sum + (eq.quantidade || 0), 0) : 0}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
 
-            {/* COMENTÁRIOS / RESPOSTA DA CONTRATADA */}
-            {report.comentariosContratada && report.comentariosContratada.length > 0 && (
-              <div className="mt-1.5">
-                <h4 className="text-[9px] font-bold bg-amber-700 text-white py-0.5 px-2 uppercase tracking-wide">
-                  COMENTÁRIOS / RESPOSTA DA CONTRATADA (SEEL ENGENHARIA)
-                </h4>
-                <div className="border border-gray-300 p-2 min-h-10 bg-white flex flex-col gap-1 text-[8.5px]">
-                  {report.comentariosContratada.map((comm, idx) => (
-                    <div key={idx} className="flex gap-1 items-start text-gray-800 leading-tight">
-                      <span className="text-amber-800 font-bold">{(idx + 1).toString().padStart(3, "0")} -</span>
-                      <p className="flex-1 italic font-medium">{comm}</p>
-                    </div>
-                  ))}
+  // DEDICATED HIGH-RES PHOTO GALLERY PAGES FOR ACTIVITY IMAGES
+  const allActivityPhotos: { actIndex: number; actDesc: string; imgUrl: string; imgIndex: number }[] = [];
+  if (report.atividades && report.atividades.length > 0) {
+    report.atividades.forEach((act, aIdx) => {
+      if (act.imagens && act.imagens.length > 0) {
+        act.imagens.forEach((imgUrl, iIdx) => {
+          allActivityPhotos.push({
+            actIndex: aIdx + 1,
+            actDesc: act.descricao || act.local || `Atividade #${aIdx + 1}`,
+            imgUrl,
+            imgIndex: iIdx + 1,
+          });
+        });
+      }
+    });
+  }
+
+  if (allActivityPhotos.length > 0) {
+    const photoChunks = Array.from(
+      { length: Math.ceil(allActivityPhotos.length / 4) },
+      (_, i) => allActivityPhotos.slice(i * 4, i * 4 + 4)
+    );
+
+    photoChunks.forEach((chunk, pageIdx) => {
+      pages.push(
+        <div key={`activity-photos-${pageIdx}`} className="flex flex-col gap-3 text-[8.5px]">
+          <h4 className="text-[9px] font-bold bg-[#004899] text-white py-0.5 px-2 uppercase tracking-wide flex justify-between">
+            <span>REGISTRO FOTOGRÁFICO DE ATIVIDADES — PARTE {pageIdx + 1} DE {photoChunks.length}</span>
+            <span className="font-mono text-[8px] font-normal">Total: {allActivityPhotos.length} foto(s)</span>
+          </h4>
+
+          <div className="grid grid-cols-2 gap-3.5">
+            {chunk.map((photo, pIdx) => (
+              <div key={pIdx} className="border border-gray-300 rounded p-2 bg-white flex flex-col items-center shadow-2xs">
+                <div className="w-full h-[310px] flex items-center justify-center bg-gray-50 rounded border border-gray-200 overflow-hidden">
+                  <img
+                    src={photo.imgUrl}
+                    alt={photo.actDesc}
+                    className="max-h-[310px] max-w-full object-contain"
+                  />
+                </div>
+                <div className="w-full mt-2 text-center">
+                  <span className="text-[8px] font-bold text-[#004899] block uppercase tracking-wide">
+                    Atividade #{photo.actIndex} — Foto {photo.imgIndex}
+                  </span>
+                  <p className="text-[7.5px] text-gray-700 font-medium line-clamp-2 mt-0.5 font-sans leading-tight">
+                    {photo.actDesc}
+                  </p>
                 </div>
               </div>
+            ))}
+          </div>
+        </div>
+      );
+    });
+  }
+
+  // PAGE FOR COMMENTS (IF APPLICABLE)
+  if ((report.comentariosGerenciadoraContratante && report.comentariosGerenciadoraContratante.length > 0) || (report.comentariosContratada && report.comentariosContratada.length > 0)) {
+    pages.push(
+      <div key="page-comments" className="flex flex-col gap-3 text-[8.5px]">
+        <div>
+          <h4 className="text-[9px] font-bold bg-[#004899] text-white py-0.5 px-2 uppercase tracking-wide">
+            COMENTÁRIO DA FISCALIZAÇÃO / GERENCIADORA / CONTRATANTE
+          </h4>
+          <div className="border border-gray-300 p-2 min-h-14 bg-white flex flex-col gap-1 text-[8.5px]">
+            {report.comentariosGerenciadoraContratante && report.comentariosGerenciadoraContratante.length > 0 ? (
+              report.comentariosGerenciadoraContratante.map((comm, idx) => (
+                <div key={idx} className="flex gap-1 items-start text-gray-700 leading-tight">
+                  <span className="text-[#004899] font-bold">{(idx + 1).toString().padStart(3, "0")} -</span>
+                  <p className="flex-1 italic">{comm}</p>
+                </div>
+              ))
+            ) : (
+              <p className="text-gray-400 italic text-[8px] text-center my-auto">Nenhum comentário adicionado pela fiscalização contratante.</p>
             )}
           </div>
-
-          <PrintFooter pageNum={3} />
         </div>
 
-        {/* ================= PAGE(S) ANEXOS ================= */}
-        {report.anexos && report.anexos.length > 0 && Array.from({ length: Math.ceil(report.anexos.length / 2) }).map((_, pageIdx) => {
-          const sliceAnexos = (report.anexos || []).slice(pageIdx * 2, pageIdx * 2 + 2);
-          return (
-            <div key={`anexo-page-${pageIdx}`} className="bg-white border md:border-gray-300 p-4 md:p-8 flex flex-col w-full min-h-[1120px] print-page relative shadow-sm print:shadow-none print:border-none">
-              <PrintHeader />
-
-              <div className="mt-2 text-[8.5px] flex flex-col flex-1 gap-3.5">
-                <h4 className="text-[9px] font-bold bg-[#004899] text-white py-0.5 px-2 uppercase tracking-wide">
-                  ANEXOS DOCUMENTAIS - PARTE {pageIdx + 1}
-                </h4>
-
-                <div className="flex-1 flex flex-col gap-4">
-                  {sliceAnexos.map((anexo, idx) => {
-                    const isPdf = anexo.type === "application/pdf" || (anexo.dataUrl && anexo.dataUrl.startsWith("data:application/pdf"));
-                    return (
-                      <div key={idx} className="flex-1 border border-gray-300 rounded p-1 flex flex-col items-center justify-center bg-gray-50 overflow-hidden relative">
-                         {isPdf ? (
-                           <div className="flex flex-col items-center justify-center text-center p-6 max-w-sm">
-                             <FileText className="w-12 h-12 text-red-600 mb-2" />
-                             <h5 className="text-[10px] font-bold text-gray-800 uppercase tracking-wide font-sans">{anexo.name || "Documento PDF Anexo"}</h5>
-                             <p className="text-[7px] text-gray-400 mt-1 uppercase font-mono">Tipo: Documento Digital PDF</p>
-                             <div className="w-16 border-b border-gray-200 my-2"></div>
-                             <p className="text-[8px] text-gray-400 leading-relaxed font-sans">
-                               O arquivo digital correspondente a este anexo foi consolidado com sucesso e faz parte integrante deste RDO eletrônico.
-                             </p>
-                           </div>
-                         ) : (
-                           <img src={anexo.dataUrl} className="max-w-full max-h-[440px] object-contain" alt="Anexo documental do relatório" />
-                         )}
-                      </div>
-                    );
-                  })}
+        {report.comentariosContratada && report.comentariosContratada.length > 0 && (
+          <div className="mt-1.5">
+            <h4 className="text-[9px] font-bold bg-amber-700 text-white py-0.5 px-2 uppercase tracking-wide">
+              COMENTÁRIOS / RESPOSTA DA CONTRATADA (SEEL ENGENHARIA)
+            </h4>
+            <div className="border border-gray-300 p-2 min-h-10 bg-white flex flex-col gap-1 text-[8.5px]">
+              {report.comentariosContratada.map((comm, idx) => (
+                <div key={idx} className="flex gap-1 items-start text-gray-800 leading-tight">
+                  <span className="text-amber-800 font-bold">{(idx + 1).toString().padStart(3, "0")} -</span>
+                  <p className="flex-1 italic font-medium">{comm}</p>
                 </div>
-              </div>
-
-              <PrintFooter pageNum={4 + pageIdx} />
+              ))}
             </div>
-          );
-        })}
+          </div>
+        )}
+      </div>
+    );
+  }
 
+  // PAGES FOR ANEXOS DOCUMENTAIS
+  if (report.anexos && report.anexos.length > 0) {
+    const numPages = Math.ceil(report.anexos.length / 2);
+    for (let pageIdx = 0; pageIdx < numPages; pageIdx++) {
+      const sliceAnexos = report.anexos.slice(pageIdx * 2, pageIdx * 2 + 2);
+      pages.push(
+        <div key={`anexo-page-${pageIdx}`} className="flex flex-col gap-3.5 text-[8.5px]">
+          <h4 className="text-[9px] font-bold bg-[#004899] text-white py-0.5 px-2 uppercase tracking-wide">
+            ANEXOS DOCUMENTAIS - PARTE {pageIdx + 1}
+          </h4>
+
+          <div className="flex-1 flex flex-col gap-4">
+            {sliceAnexos.map((anexo, idx) => {
+              const isPdf = anexo.type === "application/pdf" || (anexo.dataUrl && anexo.dataUrl.startsWith("data:application/pdf"));
+              return (
+                <div key={idx} className="flex-1 border border-gray-300 rounded p-1 flex flex-col items-center justify-center bg-gray-50 overflow-hidden relative">
+                  {isPdf ? (
+                    <div className="flex flex-col items-center justify-center text-center p-6 max-w-sm">
+                      <FileText className="w-12 h-12 text-red-600 mb-2" />
+                      <h5 className="text-[10px] font-bold text-gray-800 uppercase tracking-wide font-sans">{anexo.name || "Documento PDF Anexo"}</h5>
+                      <p className="text-[7px] text-gray-400 mt-1 uppercase font-mono">Tipo: Documento Digital PDF</p>
+                      <div className="w-16 border-b border-gray-200 my-2"></div>
+                      <p className="text-[8px] text-gray-400 leading-relaxed font-sans">
+                        O arquivo digital correspondente a este anexo foi consolidado com sucesso e faz parte integrante deste RDO eletrônico.
+                      </p>
+                    </div>
+                  ) : (
+                    <img src={anexo.dataUrl} className="max-w-full max-h-[440px] object-contain" alt="Anexo documental do relatório" />
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      );
+    }
+  }
+
+  const totalPages = pages.length;
+
+  return (
+    <div className="flex flex-col gap-6 print:gap-0 bg-transparent print:bg-white mb-6 print:mb-0">
+      {pages.map((pageContent, idx) => (
+        <div
+          key={idx}
+          className="bg-white border md:border-gray-300 p-4 md:p-8 flex flex-col w-full min-h-[1120px] print-page relative shadow-sm print:shadow-none print:border-none box-sizing:border-box"
+        >
+          <PrintHeader />
+          <div className="mt-2 text-[8.5px] flex flex-col flex-1 pb-28">
+            {pageContent}
+          </div>
+          <PrintFooter pageNum={idx + 1} totalPages={totalPages} />
+        </div>
+      ))}
     </div>
   );
 };
@@ -1127,7 +1208,7 @@ export const RdoPrintView: React.FC<RdoPrintViewProps> = ({ report, reportsToPri
             <button
               disabled={activeIndex === totalReportsCount - 1}
               onClick={() => setActiveIndex(prev => Math.min(totalReportsCount - 1, prev + 1))}
-              className="p-1 text-slate-500 hover:text-slate-800 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
+              className="p-1 text-slate-500 hover:text-slate-850 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
               title="Próximo Diário"
             >
               <ChevronRight className="w-4 h-4" />
@@ -1139,11 +1220,6 @@ export const RdoPrintView: React.FC<RdoPrintViewProps> = ({ report, reportsToPri
           <div className="hidden sm:flex bg-blue-50 border border-blue-100 px-3 py-1 rounded-lg items-center gap-1.5 text-xs text-blue-700">
             <ShieldCheck className="w-4 h-4 text-blue-500" />
             <span>Assinaturas Ativas</span>
-          </div>
-
-          <div className="hidden no-print flex-col justify-center px-2 mr-2">
-            <span className="text-[10px] text-amber-600 font-bold leading-tight">Nota: Se a janela de impressão não abrir,</span>
-            <span className="text-[9px] text-amber-700">Abra o aplicativo em uma nova guia.</span>
           </div>
 
           {exportMode === "single" ? (

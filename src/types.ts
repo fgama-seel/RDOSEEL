@@ -17,6 +17,11 @@ export interface EffectiveSummary {
   subcontratadosMoiMod: number;
   afastados: number;
   total: number;
+  moiTotal?: number;
+  modTotal?: number;
+  subcontratadosTotal?: number;
+  afastadosTotal?: number;
+  totalGeralPresentes?: number;
 }
 
 export interface StoppagesSummary {
@@ -28,6 +33,9 @@ export interface EquipmentSummary {
   mobilizados: number;
   subcontratadosMobilizados: number;
   total: number;
+  proptiosLocados?: number;
+  subcontratados?: number;
+  totalEquipamentos?: number;
 }
 
 export interface Activity {
@@ -39,6 +47,9 @@ export interface Activity {
   intervalo: string;
   total: string;
   comentario?: string;
+  comentarios?: string;
+  local?: string;
+  pqItemDesc?: string;
   imagens?: string[]; // base64 encoded jpeg/png or urls
 }
 
@@ -162,20 +173,26 @@ export interface RdoReport {
   commentNotificationText?: string;
   
   // Signatures
+  uuid?: string;
+  contratoNo?: string;
+  contratante?: string;
   emitenteNome: string;
   emitenteConsolidado: string;
   emitenteHash: string;
   emitenteAssinado?: boolean;
+  emitenteDataAssinatura?: string;
   
   gerenciadoraNome?: string;
   gerenciadoraConsolidado?: string;
   gerenciadoraHash?: string;
   gerenciadoraAssinado?: boolean;
+  gerenciadoraDataAssinatura?: string;
   
   contratanteNome: string;
   contratanteAprovado: string;
   contratanteHash: string;
   contratanteAssinado?: boolean;
+  contratanteDataAssinatura?: string;
   
   createdAt?: string;
   updatedAt?: string;
@@ -225,6 +242,7 @@ export interface ObraConfig {
   aditivoPrazo: number; // in days
   logoCliente?: string; // base64
   logoSeel?: string; // base64
+  logoUrl?: string;
   atividades: ObraActivity[]; // PQ catalogue
   subcontratadas: string[]; // list of companies
   quadroEfetivos?: ObraEfetivoMember[]; // Quadro de Efetivos cadastrado na Obra
@@ -234,6 +252,7 @@ export interface ObraConfig {
   // Default Signers Configured per Obra
   emissorNomeDefault?: string;
   fiscalGerenciadoraNomeDefault?: string;
+  fiscalContratanteNomeDefault?: string;
   fiscalAprovadorNomeDefault?: string;
   
   createdAt?: string;
