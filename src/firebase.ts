@@ -14,6 +14,9 @@ import {
 } from "firebase/auth";
 import { 
   getFirestore, 
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
   collection, 
   doc, 
   getDocs, 
@@ -41,7 +44,18 @@ if (isFirebaseConfigured) {
   try {
     app = initializeApp(firebaseConfig);
     auth = getAuth(app);
-    db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+
+    // Initialize Firestore with IndexedDB persistent local cache
+    try {
+      db = initializeFirestore(app, {
+        localCache: persistentLocalCache({
+          tabManager: persistentMultipleTabManager()
+        })
+      }, firebaseConfig.firestoreDatabaseId || "(default)");
+    } catch (e) {
+      console.warn("Falling back to standard getFirestore:", e);
+      db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+    }
 
     // Test connection as instructed by skill
     const testConnection = async () => {
