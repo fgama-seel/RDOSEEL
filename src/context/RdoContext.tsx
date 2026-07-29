@@ -540,16 +540,19 @@ export const RdoProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     }
 
+    const isNewReport = !report.id || !reports.some(r => r.id === report.id);
+
     // Always update local cache array safely
     let localUpdatedList: RdoReport[] = [];
-    if (reportToSave.id) {
-      localUpdatedList = reports.map(r => r.id === reportToSave.id ? reportToSave : r);
-    } else {
-      if (!reportToSave.id) {
-        reportToSave.id = "rdo-" + Math.random().toString(36).substr(2, 9);
-      }
+    if (!reportToSave.id) {
+      reportToSave.id = "rdo-" + Math.random().toString(36).substr(2, 9);
       reportToSave.createdAt = new Date().toISOString();
-      localUpdatedList = [reportToSave, ...reports];
+    }
+
+    if (isNewReport) {
+      localUpdatedList = [reportToSave, ...reports.filter(r => r.id !== reportToSave.id)];
+    } else {
+      localUpdatedList = reports.map(r => r.id === reportToSave.id ? reportToSave : r);
     }
     safeSetLocalStorage(LOCAL_REPORTS_KEY, localUpdatedList);
 
@@ -557,20 +560,20 @@ export const RdoProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const path = "rdos";
       try {
         const cleanedReport = JSON.parse(JSON.stringify(reportToSave));
-        if (cleanedReport.id) {
-          const docRef = doc(db, path, cleanedReport.id);
-          await setDoc(docRef, cleanedReport);
-          setReports(prev => 
-            prev.map(r => r.id === cleanedReport.id ? cleanedReport : r)
-          );
-        } else {
-          const collRef = collection(db, path);
-          const docRef = await addDoc(collRef, cleanedReport);
-          reportToSave.id = docRef.id;
-          cleanedReport.id = docRef.id;
-          setReports(prev => [cleanedReport, ...prev]);
-        }
+        const docRef = doc(db, path, cleanedReport.id);
+        await setDoc(docRef, cleanedReport);
+        setReports(prev => {
+          const exists = prev.some(r => r.id === cleanedReport.id);
+          if (exists) {
+            return prev.map(r => r.id === cleanedReport.id ? cleanedReport : r);
+          } else {
+            return [cleanedReport, ...prev];
+          }
+        });
         setCurrentReport(reportToSave);
+        if (reportToSave.id) {
+          safeSetLocalStorage("rdo_current_report_id", reportToSave.id);
+        }
         await logAction(logActionType, logMessage);
       } catch (error: any) {
         console.error("Erro no salvamento do Firebase, mantendo salvo em LocalStorage:", error);
@@ -580,11 +583,17 @@ export const RdoProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
         setReports(localUpdatedList);
         setCurrentReport(reportToSave);
+        if (reportToSave.id) {
+          safeSetLocalStorage("rdo_current_report_id", reportToSave.id);
+        }
       }
     } else {
       // Local Save
       setReports(localUpdatedList);
       setCurrentReport(reportToSave);
+      if (reportToSave.id) {
+        safeSetLocalStorage("rdo_current_report_id", reportToSave.id);
+      }
     }
   };
 

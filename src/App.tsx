@@ -177,6 +177,8 @@ function AppContent() {
     try {
       const freshTemplate = createNewReport();
       await saveReport(freshTemplate);
+      setActiveView("rdo");
+      setShowPrintView(false);
     } catch (e) {
       console.warn("RDO creation prevented:", e);
     }
