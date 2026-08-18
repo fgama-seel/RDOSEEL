@@ -12,6 +12,7 @@ import { ObraManagerModal } from "./components/ObraManagerModal";
 import { ConsolidatedReports } from "./components/ConsolidatedReports";
 import { AuditoriaTab } from "./components/AuditoriaTab";
 import { BatchSignModal } from "./components/BatchSignModal";
+import { UserManualModal } from "./components/UserManualModal";
 import { RdoReport } from "./types";
 import { 
   HardHat, 
@@ -31,7 +32,8 @@ import {
   BarChart3,
   Bell,
   FileSignature,
-  AlertTriangle
+  AlertTriangle,
+  BookOpen
 } from "lucide-react";
 
 // Formatting helper
@@ -92,6 +94,7 @@ function AppContent() {
   const [showBatchPrint, setShowBatchPrint] = useState(false);
   const [showBatchSignModal, setShowBatchSignModal] = useState(false);
   const [showBatchPrintConfig, setShowBatchPrintConfig] = useState(false);
+  const [showUserManual, setShowUserManual] = useState(false);
   const [batchStartDate, setBatchStartDate] = useState("");
   const [batchEndDate, setBatchEndDate] = useState("");
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
@@ -268,6 +271,14 @@ function AppContent() {
                 Auditoria
               </button>
             )}
+            <button
+              onClick={() => setShowUserManual(true)}
+              className="px-3 h-8 rounded-md text-[10px] font-extrabold uppercase tracking-wider transition-all border-none cursor-pointer flex items-center gap-1.5 text-slate-700 hover:text-amber-700 hover:bg-amber-100/70 bg-amber-500/15 border border-amber-500/30 shadow-2xs"
+              title="Abrir o Manual do Usuário (Procedimentos, Configuração e Preenchimento de RDO)"
+            >
+              <BookOpen className="w-3.5 h-3.5 text-amber-600" />
+              Manual do Usuário
+            </button>
           </div>
         </div>
 
@@ -400,15 +411,23 @@ function AppContent() {
 
           <div className="h-6 border-l border-slate-200 hidden sm:block"></div>
 
+          {/* Indicador minimalista de sincronização (Bolinha verde pulsante com tooltip) */}
           {isFirebase ? (
-            <div className="bg-green-50 border border-green-150 px-2.5 py-0.5 rounded text-[10px] font-bold text-green-700 flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
-              BANCO DE DADOS SINCRONIZADO
+            <div 
+              className="p-1.5 rounded-full hover:bg-green-50 transition-colors flex items-center justify-center cursor-help"
+              title="Banco de Dados Sincronizado e Conectado (Firestore Online)"
+            >
+              <span className="relative flex h-3 w-3">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-3 w-3 bg-green-500 border border-white shadow-2xs"></span>
+              </span>
             </div>
           ) : (
-            <div className="bg-amber-50 border border-amber-100 px-2.5 py-0.5 rounded text-[10px] font-bold text-amber-800 flex items-center gap-1" title="Seu diário é salvo com segurança no LocalStorage do seu navegador">
-              <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
-              LOCAL RASCUNHO
+            <div 
+              className="p-1.5 rounded-full hover:bg-amber-50 transition-colors flex items-center justify-center cursor-help" 
+              title="Modo Local: Salvo em cache no navegador"
+            >
+              <span className="inline-flex rounded-full h-3 w-3 bg-amber-500 border border-white shadow-2xs"></span>
             </div>
           )}
 
@@ -927,6 +946,12 @@ function AppContent() {
         user={user}
         accessLevel={accessLevel}
         saveReport={saveReport}
+      />
+
+      {/* 7. MANUAL DO USUARIO MODAL */}
+      <UserManualModal
+        isOpen={showUserManual}
+        onClose={() => setShowUserManual(false)}
       />
 
     </div>

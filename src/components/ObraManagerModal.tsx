@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useRdoStore } from "../context/RdoContext";
-import { ObraConfig, ObraActivity, ObraPermission, ObraEfetivoMember } from "../types";
+import { ObraConfig, ObraActivity, ObraPermission, ObraEfetivoMember, OrphanObraInfo } from "../types";
 import { compressImage } from "../utils/imageUtils";
 import { 
   X, 
@@ -18,7 +18,9 @@ import {
   FileSpreadsheet,
   AlertTriangle,
   Download,
-  RotateCcw
+  RotateCcw,
+  Search,
+  CheckCircle2
 } from "lucide-react";
 
 interface ObraManagerModalProps {
@@ -27,9 +29,23 @@ interface ObraManagerModalProps {
 }
 
 export const ObraManagerModal: React.FC<ObraManagerModalProps> = ({ isOpen, onClose }) => {
-  const { obras, saveObra, deleteObra, recoverOrphanObras, currentObra, setCurrentObra, user, firebaseError } = useRdoStore();
+  const { 
+    obras, 
+    saveObra, 
+    deleteObra, 
+    recoverSpecificObra,
+    getOrphanObrasList,
+    currentObra, 
+    setCurrentObra, 
+    user, 
+    firebaseError 
+  } = useRdoStore();
   const isQuotaExceeded = Boolean(firebaseError);
   const [isRecovering, setIsRecovering] = useState(false);
+  const [orphanObras, setOrphanObras] = useState<OrphanObraInfo[]>([]);
+  const [selectedOrphanKey, setSelectedOrphanKey] = useState<string>("");
+  const [isLoadingOrphans, setIsLoadingOrphans] = useState(false);
+  const [hasSearchedOrphans, setHasSearchedOrphans] = useState(false);
 
   const [selectedObraId, setSelectedObraId] = useState<string>("");
   const [nome, setNome] = useState("");
@@ -73,6 +89,8 @@ export const ObraManagerModal: React.FC<ObraManagerModalProps> = ({ isOpen, onCl
   const [newEfetivoCadastrados, setNewEfetivoCadastrados] = useState<number>(1);
 
   const [message, setMessage] = useState<{ text: string; type: "success" | "error" } | null>(null);
+  const [sidebarTab, setSidebarTab] = useState<"ativas" | "inativas">("ativas");
+  const [obraToDeleteConfirm, setObraToDeleteConfirm] = useState<string | null>(null);
 
   // Load selected Obra into form
   useEffect(() => {
@@ -127,8 +145,6 @@ export const ObraManagerModal: React.FC<ObraManagerModalProps> = ({ isOpen, onCl
       setSelectedObraId(obras[0].id || "");
     }
   }, [isOpen, obras, selectedObraId]);
-
-  if (!isOpen) return null;
 
   // Image upload to base64
   const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>, target: "cliente" | "seel") => {
@@ -451,50 +467,106 @@ export const ObraManagerModal: React.FC<ObraManagerModalProps> = ({ isOpen, onCl
     }
   };
 
-  const handleDeleteObraClick = async () => {
-    if (selectedObraId === "new") return;
-    if (obras.length <= 1) {
-      alert("Não é possível remover a única obra ativa do sistema.");
-      return;
+  // Auto check for orphan obras on modal open
+  useEffect(() => {
+    if (isOpen) {
+      handleSearchOrphans();
     }
-    const confirm = window.confirm(`Tem certeza que deseja excluir as configurações da obra "${nome}"? RDOs vinculados a este código continuarão salvos, mas perderão a referência de dados.`);
-    if (confirm) {
-      try {
-        await deleteObra(selectedObraId);
-        setSelectedObraId(obras[0]?.id || "");
-        setMessage({ text: "Obra excluída com sucesso.", type: "success" });
-        setTimeout(() => setMessage(null), 3000);
-      } catch (e: any) {
-        alert("Erro ao remover obra: " + e.message);
+  }, [isOpen]);
+
+  const handleSearchOrphans = async () => {
+    setIsLoadingOrphans(true);
+    try {
+      const list = await getOrphanObrasList();
+      setOrphanObras(list);
+      setHasSearchedOrphans(true);
+      if (list.length > 0) {
+        setSelectedOrphanKey(list[0].key);
+      } else {
+        setSelectedOrphanKey("");
       }
+    } catch (e) {
+      console.warn("Erro ao buscar obras órfãs:", e);
+    } finally {
+      setIsLoadingOrphans(false);
     }
   };
 
-  const handleRecoverObrasClick = async () => {
+  const handleRecoverSingleObraClick = async (keyToRecover?: string) => {
+    const targetKey = keyToRecover || selectedOrphanKey;
+    if (!targetKey) return;
     setIsRecovering(true);
     setMessage(null);
     try {
-      const res = await recoverOrphanObras();
-      if (res.recoveredObras.length > 0) {
-        setMessage({
-          text: `🎉 Sucesso! Recuperamos ${res.recoveredObras.length} obra(s) (${res.recoveredObras.join(", ")}) e reativamos ${res.totalRdos} RDO(s) no sistema!`,
-          type: "success"
-        });
+      const res = await recoverSpecificObra(targetKey);
+      setMessage({
+        text: `🎉 Obra "${res.recoveredObra.nome}" restaurada e ativada com sucesso com ${res.totalRdos} RDO(s)!`,
+        type: "success"
+      });
+      setTimeout(() => setMessage(null), 4000);
+      if (res.recoveredObra.id) {
+        setSelectedObraId(res.recoveredObra.id);
+        setSidebarTab("ativas");
+      }
+      const updatedList = orphanObras.filter(o => o.key !== targetKey);
+      setOrphanObras(updatedList);
+      if (updatedList.length > 0) {
+        setSelectedOrphanKey(updatedList[0].key);
       } else {
-        setMessage({
-          text: "Varredura concluída: Todas as obras vinculadas a RDOs existentes já estão cadastradas e ativas.",
-          type: "success"
-        });
+        setSelectedOrphanKey("");
       }
     } catch (e: any) {
       setMessage({
-        text: "Erro durante a recuperação: " + (e.message || e),
+        text: "Erro ao restaurar a obra: " + (e.message || e),
         type: "error"
       });
     } finally {
       setIsRecovering(false);
     }
   };
+
+  const confirmDeleteObra = async () => {
+    if (!obraToDeleteConfirm || obraToDeleteConfirm === "new") return;
+    if (obras.length <= 1) {
+      alert("Atenção: Não é possível remover a única obra ativa do sistema sem antes cadastrar uma nova.");
+      setObraToDeleteConfirm(null);
+      return;
+    }
+    const targetObra = obras.find(o => o.id === obraToDeleteConfirm);
+    const obraNome = targetObra?.nome || nome || "esta obra";
+    const idToDelete = obraToDeleteConfirm;
+    const remaining = obras.filter(o => o.id !== idToDelete);
+
+    try {
+      await deleteObra(idToDelete);
+      setObraToDeleteConfirm(null);
+
+      if (remaining.length > 0) {
+        setSelectedObraId(remaining[0].id || "");
+      } else {
+        setSelectedObraId("new");
+      }
+
+      setMessage({ 
+        text: `Obra "${obraNome}" desativada e movida para a lista de Inativas.`, 
+        type: "success" 
+      });
+      setTimeout(() => setMessage(null), 4500);
+
+      // Atualiza imediatamente a lista de órfãs / inativas passando as obras restantes
+      const list = await getOrphanObrasList(remaining);
+      setOrphanObras(list);
+      setHasSearchedOrphans(true);
+      if (list.length > 0) {
+        setSelectedOrphanKey(list[0].key);
+      }
+    } catch (e: any) {
+      setObraToDeleteConfirm(null);
+      setMessage({ text: "Erro ao remover obra: " + (e.message || e), type: "error" });
+    }
+  };
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
@@ -511,7 +583,7 @@ export const ObraManagerModal: React.FC<ObraManagerModalProps> = ({ isOpen, onCl
           </div>
           <button 
             onClick={onClose}
-            className="p-1 px-1.5 hover:bg-slate-850 rounded text-slate-400 hover:text-white transition-colors"
+            className="p-1 px-1.5 hover:bg-slate-850 rounded text-slate-400 hover:text-white transition-colors cursor-pointer border-none bg-transparent"
           >
             <X className="w-4 h-4" />
           </button>
@@ -521,48 +593,196 @@ export const ObraManagerModal: React.FC<ObraManagerModalProps> = ({ isOpen, onCl
         <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
           
           {/* Work Selector Sidebar */}
-          <aside className="w-full md:w-64 bg-slate-50 border-b md:border-b-0 md:border-r border-slate-200 p-4 flex flex-col gap-3 shrink-0">
-            <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Selecionar Obra</span>
+          <aside className="w-full md:w-72 bg-slate-50 border-b md:border-b-0 md:border-r border-slate-200 p-4 flex flex-col gap-3 shrink-0 overflow-y-auto">
             
-            <select
-              value={selectedObraId}
-              onChange={(e) => setSelectedObraId(e.target.value)}
-              className="w-full bg-white border border-slate-300 rounded p-2 text-xs font-semibold outline-none focus:ring-1 focus:ring-amber-500"
-            >
-              {obras.map(o => (
-                <option key={o.id} value={o.id}>{o.nome}</option>
-              ))}
-              <option value="new">+ Cadastrar Nova Obra</option>
-            </select>
-
-            <div className="border-t border-slate-200 pt-3 mt-1 flex flex-col gap-1 text-[11px] text-slate-500">
-              <p className="font-semibold text-slate-700">Dica profissional:</p>
-              <p className="leading-relaxed">Preencha o catálogo da obra (atividades e subcontratadas) para que, na criação de diários novos, o sistema complete as tabelas automaticamente sem re-digitar nada.</p>
-            </div>
-
-            {/* Recuperação de Obras / RDOs Antigos */}
-            <div className="border-t border-slate-200 pt-3 flex flex-col gap-2">
-              <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">Recuperação de Dados</span>
+            {/* Abas Ativas vs Inativas */}
+            <div className="flex items-center bg-slate-200/70 p-1 rounded-lg border border-slate-300/60 shadow-inner">
               <button
                 type="button"
-                onClick={handleRecoverObrasClick}
-                disabled={isRecovering}
-                className="w-full py-2 px-2.5 border border-amber-300 text-amber-900 rounded-lg bg-amber-50/80 hover:bg-amber-100/90 transition-all text-xs font-bold flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer disabled:opacity-50"
-                title="Localiza todos os RDOs salvos no banco de dados e restaura automaticamente as obras que foram excluídas"
+                onClick={() => { setSidebarTab("ativas"); setObraToDeleteConfirm(null); }}
+                className={`flex-1 py-1.5 px-2 rounded-md text-[11px] font-bold uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all border-none cursor-pointer ${
+                  sidebarTab === "ativas"
+                    ? "bg-white text-slate-900 shadow-xs"
+                    : "text-slate-600 hover:text-slate-900 hover:bg-slate-300/40"
+                }`}
               >
-                <RotateCcw className={`w-3.5 h-3.5 text-amber-700 ${isRecovering ? 'animate-spin' : ''}`} />
-                {isRecovering ? "Recuperando..." : "Restaurar Obras dos RDOs"}
+                <Briefcase className="w-3.5 h-3.5 text-amber-600" />
+                Ativas ({obras.length})
+              </button>
+
+              <button
+                type="button"
+                onClick={() => { 
+                  setSidebarTab("inativas"); 
+                  setObraToDeleteConfirm(null);
+                  handleSearchOrphans(); 
+                }}
+                className={`flex-1 py-1.5 px-2 rounded-md text-[11px] font-bold uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all border-none cursor-pointer ${
+                  sidebarTab === "inativas"
+                    ? "bg-amber-500 text-slate-950 font-black shadow-xs"
+                    : "text-slate-600 hover:text-slate-900 hover:bg-slate-300/40"
+                }`}
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                Inativas ({orphanObras.length})
               </button>
             </div>
 
-            {selectedObraId !== "new" && (
-              <button
-                onClick={handleDeleteObraClick}
-                className="w-full mt-auto py-1 px-2 border border-red-200 text-red-600 rounded bg-red-50 hover:bg-red-100 transition-colors text-xs font-bold leading-none flex items-center justify-center gap-1.5 p-2"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                Remover Obra
-              </button>
+            {sidebarTab === "ativas" ? (
+              <div className="flex flex-col gap-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Obras Cadastradas</span>
+                  <button
+                    type="button"
+                    onClick={() => { setSelectedObraId("new"); setObraToDeleteConfirm(null); }}
+                    className="text-[10px] text-amber-700 hover:text-amber-900 font-bold flex items-center gap-0.5 cursor-pointer hover:underline border-none bg-transparent"
+                  >
+                    <Plus className="w-3 h-3" />
+                    Nova Obra
+                  </button>
+                </div>
+
+                <div className="space-y-1.5 max-h-60 md:max-h-72 overflow-y-auto pr-0.5">
+                  {obras.map(o => {
+                    const isSelected = selectedObraId === o.id;
+                    return (
+                      <button
+                        key={o.id}
+                        type="button"
+                        onClick={() => { setSelectedObraId(o.id || ""); setObraToDeleteConfirm(null); }}
+                        className={`w-full text-left p-2.5 rounded-lg border transition-all cursor-pointer flex flex-col gap-0.5 ${
+                          isSelected
+                            ? "bg-amber-50 border-amber-300 ring-1 ring-amber-400/50 shadow-2xs"
+                            : "bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50"
+                        }`}
+                      >
+                        <span className={`text-xs font-bold truncate ${isSelected ? "text-amber-950" : "text-slate-800"}`}>
+                          {o.nome}
+                        </span>
+                        <div className="flex items-center justify-between text-[10px] text-slate-500">
+                          <span className="truncate">{o.cliente || "Cliente não informado"}</span>
+                          {o.numeroContrato && <span className="font-mono text-[9px] text-slate-400">{o.numeroContrato}</span>}
+                        </div>
+                      </button>
+                    );
+                  })}
+
+                  <button
+                    type="button"
+                    onClick={() => { setSelectedObraId("new"); setObraToDeleteConfirm(null); }}
+                    className={`w-full text-left p-2.5 rounded-lg border border-dashed transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                      selectedObraId === "new"
+                        ? "bg-amber-100/50 border-amber-400 text-amber-900 font-bold"
+                        : "border-slate-300 hover:border-amber-400 text-slate-500 hover:text-amber-800 hover:bg-amber-50/50 bg-white"
+                    }`}
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span className="text-xs font-semibold">+ Cadastrar Nova Obra</span>
+                  </button>
+                </div>
+
+                {/* Box de Confirmação Inline de Remoção */}
+                {selectedObraId !== "new" && (
+                  <div className="pt-2 border-t border-slate-200 mt-1">
+                    {obraToDeleteConfirm === selectedObraId ? (
+                      <div className="bg-red-50 border border-red-200 rounded-xl p-3 flex flex-col gap-2 shadow-xs">
+                        <div className="flex items-start gap-1.5 text-red-800">
+                          <AlertTriangle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+                          <div className="text-[11px] leading-tight">
+                            <strong className="block text-red-950">Desativar esta Obra?</strong>
+                            Ela sairá da lista de ativas e será movida para as Inativas. Seus diários (RDOs) permanecerão intactos no banco de dados.
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 pt-1">
+                          <button
+                            type="button"
+                            onClick={confirmDeleteObra}
+                            className="flex-1 py-1.5 bg-red-600 hover:bg-red-700 active:bg-red-800 text-white rounded-md text-xs font-bold shadow-xs cursor-pointer border-none"
+                          >
+                            Confirmar Remoção
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setObraToDeleteConfirm(null)}
+                            className="py-1.5 px-3 bg-white hover:bg-slate-100 border border-slate-300 text-slate-700 rounded-md text-xs font-semibold cursor-pointer"
+                          >
+                            Cancelar
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setObraToDeleteConfirm(selectedObraId)}
+                        className="w-full py-2 px-2.5 border border-red-200 text-red-600 rounded-lg bg-red-50 hover:bg-red-100 active:bg-red-200 transition-colors text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer"
+                        title="Desativar e mover esta obra para a lista de Inativas"
+                      >
+                        <Trash2 className="w-4 h-4 text-red-600" />
+                        Remover Obra
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            ) : (
+              /* ABA DE OBRAS INATIVAS */
+              <div className="flex flex-col gap-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Obras Desativadas</span>
+                  <button
+                    type="button"
+                    onClick={handleSearchOrphans}
+                    disabled={isLoadingOrphans}
+                    className="text-[10px] text-amber-700 hover:text-amber-900 font-bold flex items-center gap-1 cursor-pointer hover:underline border-none bg-transparent"
+                    title="Atualizar lista de obras com RDOs gravados"
+                  >
+                    <Search className={`w-3 h-3 ${isLoadingOrphans ? 'animate-spin' : ''}`} />
+                    {isLoadingOrphans ? 'Verificando...' : 'Atualizar'}
+                  </button>
+                </div>
+
+                <p className="text-[10px] text-slate-500 leading-tight">
+                  Obras removidas que possuem diários (RDOs) salvos no sistema. Clique em Reativar para restaurá-las.
+                </p>
+
+                {orphanObras.length > 0 ? (
+                  <div className="space-y-2 max-h-72 md:max-h-80 overflow-y-auto pr-0.5">
+                    {orphanObras.map(o => (
+                      <div
+                        key={o.key}
+                        className="bg-amber-50/80 border border-amber-200 rounded-lg p-2.5 flex flex-col gap-2 shadow-2xs"
+                      >
+                        <div>
+                          <span className="font-bold text-xs text-amber-950 block leading-tight">
+                            {o.nome}
+                          </span>
+                          <div className="text-[10px] text-amber-800/80 mt-1 flex flex-col gap-0.5">
+                            {o.cliente && <span><strong>Cliente:</strong> {o.cliente}</span>}
+                            <span><strong>RDOs salvos:</strong> {o.totalRdos} diário(s)</span>
+                            {o.lastRdoDate && <span><strong>Último diário:</strong> {o.lastRdoDate}</span>}
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => handleRecoverSingleObraClick(o.key)}
+                          disabled={isRecovering}
+                          className="w-full py-1.5 px-2 bg-amber-600 hover:bg-amber-700 active:bg-amber-800 text-white rounded-md transition-all text-xs font-bold flex items-center justify-center gap-1.5 shadow-xs cursor-pointer disabled:opacity-50 border-none"
+                        >
+                          <RotateCcw className={`w-3.5 h-3.5 ${isRecovering ? 'animate-spin' : ''}`} />
+                          {isRecovering ? "Reativando..." : "Reativar / Restaurar Obra"}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="bg-slate-100 border border-slate-200 rounded-xl p-4 text-center space-y-1 text-slate-500">
+                    <CheckCircle2 className="w-5 h-5 text-green-500 mx-auto" />
+                    <p className="text-xs font-bold text-slate-700">Nenhuma obra inativa</p>
+                    <p className="text-[10px]">Todas as obras com RDOs estão ativas no painel.</p>
+                  </div>
+                )}
+              </div>
             )}
           </aside>
 

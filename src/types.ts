@@ -259,3 +259,15 @@ export interface ObraConfig {
   updatedAt?: string;
 }
 
+export interface OrphanObraInfo {
+  key: string;
+  nome: string;
+  obraId?: string;
+  totalRdos: number;
+  lastRdoDate?: string;
+  cliente?: string;
+  contratada?: string;
+  gerenciadora?: string;
+  numeroContrato?: string;
+}
+

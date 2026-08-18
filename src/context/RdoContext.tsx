@@ -11,7 +11,9 @@ import {
   Activity, 
   StoppagesDetail,
   ObraConfig,
-  AuditLog
+  ObraActivity,
+  AuditLog,
+  OrphanObraInfo
 } from "../types";
 import { 
   isFirebaseConfigured, 
@@ -65,6 +67,8 @@ interface RdoContextType {
   setCurrentObra: (obra: ObraConfig | null) => void;
   saveObra: (obra: ObraConfig) => Promise<void>;
   deleteObra: (id: string) => Promise<void>;
+  getOrphanObrasList: (currentActiveObras?: ObraConfig[]) => Promise<OrphanObraInfo[]>;
+  recoverSpecificObra: (obraKeyOrId: string) => Promise<{ recoveredObra: ObraConfig; totalRdos: number }>;
   recoverOrphanObras: () => Promise<{ recoveredObras: string[]; totalRdos: number }>;
   isObrasLoading: boolean;
   
@@ -252,67 +256,6 @@ export const RdoProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             const docRef = doc(db, "obras", "obra-saneamento-leste");
             await setDoc(docRef, defaultSeeded);
             loaded = [defaultSeeded];
-          }
-
-          // Verificação de obras órfãs a partir dos RDOs existentes
-          try {
-            const snapRdos = await getDocs(collection(db, "rdos"));
-            const orphanMap: { [key: string]: RdoReport[] } = {};
-            snapRdos.forEach((d) => {
-              const r = d.data() as RdoReport;
-              const obraKey = (r.obra || r.obraId || "").trim();
-              if (obraKey) {
-                const alreadyHas = loaded.some(o => 
-                  (o.id && (o.id === r.obraId || o.id === obraKey)) || 
-                  (o.nome && o.nome.trim().toLowerCase() === obraKey.toLowerCase())
-                );
-                if (!alreadyHas) {
-                  if (!orphanMap[obraKey]) orphanMap[obraKey] = [];
-                  orphanMap[obraKey].push({ id: d.id, ...r });
-                }
-              }
-            });
-
-            for (const [obraKey, list] of Object.entries(orphanMap)) {
-              const sample = list[0];
-              const restoredId = sample.obraId && sample.obraId.startsWith("obra-")
-                ? sample.obraId
-                : "obra-" + encodeURIComponent(obraKey.toLowerCase().replace(/[^a-z0-9]/g, "-"));
-              
-              const restored: ObraConfig = {
-                id: restoredId,
-                userId: user.uid,
-                nome: sample.obra || obraKey,
-                numeroContrato: sample.contratoNo || "",
-                cliente: sample.cliente || "CLIENTE PRINCIPAL",
-                contratada: sample.contratada || "SEEL SERVIÇOS DE ENGENHARIA LTDA",
-                gerenciadora: sample.gerenciadora || "",
-                dataInicio: sample.inicio || new Date().toISOString().split("T")[0],
-                prazoContratual: sample.prazo || 365,
-                aditivoPrazo: 0,
-                atividades: (sample.atividades || []).map((a, i) => ({
-                  id: `act-${i}`,
-                  ref: a.ref || String(i + 1).padStart(3, "0"),
-                  fase: a.fase || "ATIVIDADES",
-                  identificador: a.identificador || `1.${i + 1}`,
-                  descricao: a.descricao || "",
-                  unidade: "m³"
-                })),
-                subcontratadas: [],
-                permissoes: [],
-                createdAt: new Date().toISOString()
-              };
-
-              try {
-                await setDoc(doc(db, "obras", restoredId), restored);
-                loaded.push(restored);
-              } catch (saveErr) {
-                console.warn("Não foi possível persistir obra órfã recuperada:", saveErr);
-                loaded.push(restored);
-              }
-            }
-          } catch (orphanErr) {
-            console.warn("Verificação de RDOs órfãos em fetchFirebaseObras ignorada:", orphanErr);
           }
 
           setObras(loaded);
@@ -1260,30 +1203,101 @@ export const RdoProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       logMessage = `Obra ${obraToDelete.nome} (ID: ${id}) deletada.`;
     }
 
+    const remaining = obras.filter(o => o.id !== id);
+
     if (activeIsFirebase && db) {
       const path = `obras/${id}`;
       try {
         await deleteDoc(doc(db, "obras", id));
-        const remaining = obras.filter(o => o.id !== id);
         setObras(remaining);
+        safeSetLocalStorage("rdo_obras_local", remaining);
         if (currentObra?.id === id) {
           setCurrentObra(remaining.length > 0 ? remaining[0] : null);
         }
         await logAction("DELETE_OBRA", logMessage);
       } catch (error) {
         handleFirestoreError(error, OperationType.DELETE, path);
+        setObras(remaining);
+        safeSetLocalStorage("rdo_obras_local", remaining);
+        if (currentObra?.id === id) {
+          setCurrentObra(remaining.length > 0 ? remaining[0] : null);
+        }
       }
     } else {
-      const updatedObras = obras.filter(o => o.id !== id);
-      safeSetLocalStorage("rdo_obras_local", updatedObras);
-      setObras(updatedObras);
+      safeSetLocalStorage("rdo_obras_local", remaining);
+      setObras(remaining);
       if (currentObra?.id === id) {
-        setCurrentObra(updatedObras.length > 0 ? updatedObras[0] : null);
+        setCurrentObra(remaining.length > 0 ? remaining[0] : null);
       }
     }
   };
 
-  const recoverOrphanObras = async (): Promise<{ recoveredObras: string[]; totalRdos: number }> => {
+  const getOrphanObrasList = async (currentActiveObras?: ObraConfig[]): Promise<OrphanObraInfo[]> => {
+    const activeList = currentActiveObras || obras;
+    let allRdos: RdoReport[] = [...reports];
+    if (activeIsFirebase && db) {
+      try {
+        const snapAll = await getDocs(collection(db, "rdos"));
+        snapAll.forEach(docSnap => {
+          const docData = { id: docSnap.id, ...docSnap.data() } as RdoReport;
+          if (!allRdos.some(r => r.id === docData.id)) {
+            allRdos.push(docData);
+          }
+        });
+      } catch (err) {
+        console.error("Erro ao buscar RDOs no Firestore para listagem de órfãos:", err);
+      }
+    }
+
+    const rawLocalRdos = localStorage.getItem(LOCAL_REPORTS_KEY);
+    if (rawLocalRdos) {
+      try {
+        const localList = JSON.parse(rawLocalRdos) as RdoReport[];
+        localList.forEach(lr => {
+          if (!allRdos.some(r => r.id === lr.id)) {
+            allRdos.push(lr);
+          }
+        });
+      } catch {}
+    }
+
+    const groups: { [key: string]: RdoReport[] } = {};
+    allRdos.forEach(r => {
+      const key = (r.obra || r.obraId || "").trim();
+      if (key && key !== "SEM_OBRA") {
+        if (!groups[key]) groups[key] = [];
+        groups[key].push(r);
+      }
+    });
+
+    const orphans: OrphanObraInfo[] = [];
+    for (const [key, rdosList] of Object.entries(groups)) {
+      const exists = activeList.some(o => 
+        (o.id && (o.id === key || rdosList.some(r => r.obraId === o.id))) ||
+        (o.nome && o.nome.trim().toLowerCase() === key.toLowerCase())
+      );
+
+      if (!exists && rdosList.length > 0) {
+        const sorted = [...rdosList].sort((a, b) => (b.data || "").localeCompare(a.data || ""));
+        const sample = sorted[0];
+        orphans.push({
+          key,
+          nome: sample.obra || key,
+          obraId: sample.obraId,
+          totalRdos: rdosList.length,
+          lastRdoDate: sample.data || "",
+          cliente: sample.cliente || "",
+          contratada: sample.contratada || "",
+          gerenciadora: sample.gerenciadora || "",
+          numeroContrato: sample.contratoNo || ""
+        });
+      }
+    }
+
+    return orphans.sort((a, b) => b.totalRdos - a.totalRdos);
+  };
+
+  const recoverSpecificObra = async (targetKey: string): Promise<{ recoveredObra: ObraConfig; totalRdos: number }> => {
     if (!user) throw new Error("Usuário não autenticado");
 
     let allRdos: RdoReport[] = [];
@@ -1298,7 +1312,6 @@ export const RdoProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     }
 
-    // Se local ou se falhou, combina com o cache local de RDOs
     const rawLocalRdos = localStorage.getItem(LOCAL_REPORTS_KEY);
     if (rawLocalRdos) {
       try {
@@ -1311,105 +1324,102 @@ export const RdoProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       } catch {}
     }
 
-    // Agrupar RDOs por Obra
-    const groupsByObraName: { [obraKey: string]: RdoReport[] } = {};
-    allRdos.forEach(r => {
-      const key = (r.obra || r.obraId || "SEM_OBRA").trim();
-      if (!groupsByObraName[key]) {
-        groupsByObraName[key] = [];
-      }
-      groupsByObraName[key].push(r);
+    const matchedRdos = allRdos.filter(r => {
+      const k = (r.obra || r.obraId || "").trim();
+      return k.toLowerCase() === targetKey.trim().toLowerCase() || r.obraId === targetKey || r.obra === targetKey;
     });
 
-    const recoveredObras: string[] = [];
-    let totalRdosRecovered = 0;
+    if (matchedRdos.length === 0) {
+      throw new Error(`Nenhum RDO encontrado para a obra "${targetKey}".`);
+    }
 
-    for (const [obraKey, rdoList] of Object.entries(groupsByObraName)) {
-      if (!obraKey || obraKey === "SEM_OBRA") continue;
+    const sorted = [...matchedRdos].sort((a, b) => (b.data || "").localeCompare(a.data || ""));
+    const sampleRdo = sorted[0];
 
-      // Verificar se essa obra já existe em 'obras'
-      const exists = obras.some(o => 
-        (o.id && rdoList.some(r => r.obraId === o.id)) ||
-        (o.nome && o.nome.trim().toLowerCase() === obraKey.toLowerCase())
-      );
-
-      if (!exists) {
-        // Encontrar o RDO mais recente / completo
-        const sorted = [...rdoList].sort((a, b) => (b.data || "").localeCompare(a.data || ""));
-        const sampleRdo = sorted[0];
-
-        // Formatar data de início
-        let formattedDataInicio = new Date().toISOString().split("T")[0];
-        if (sampleRdo.inicio) {
-          if (sampleRdo.inicio.includes("/")) {
-            const parts = sampleRdo.inicio.split("/");
-            if (parts.length === 3) {
-              formattedDataInicio = `${parts[2]}-${parts[1]}-${parts[0]}`;
-            }
-          } else if (sampleRdo.inicio.includes("-")) {
-            formattedDataInicio = sampleRdo.inicio;
-          }
+    // Formatar data de início
+    let formattedDataInicio = new Date().toISOString().split("T")[0];
+    if (sampleRdo.inicio) {
+      if (sampleRdo.inicio.includes("/")) {
+        const parts = sampleRdo.inicio.split("/");
+        if (parts.length === 3) {
+          formattedDataInicio = `${parts[2]}-${parts[1]}-${parts[0]}`;
         }
-
-        // Extrair atividades
-        const uniqueAtividades: ObraActivity[] = [];
-        (sampleRdo.atividades || []).forEach((act, idx) => {
-          if (act.descricao) {
-            uniqueAtividades.push({
-              id: `act-rec-${idx}-${Date.now()}`,
-              ref: act.ref || String(idx + 1).padStart(3, "0"),
-              fase: act.fase || "ATIVIDADES PRINCIPAIS",
-              identificador: act.identificador || `1.${idx + 1}`,
-              descricao: act.descricao,
-              unidade: "m³"
-            });
-          }
-        });
-
-        // Extrair subcontratadas
-        const subcontratadasSet = new Set<string>();
-        (sampleRdo.efetivoDetalhado || []).forEach(g => {
-          if (g.nome && !g.nome.toUpperCase().includes("SEEL")) {
-            subcontratadasSet.add(g.nome);
-          }
-        });
-
-        const targetObraId = sampleRdo.obraId && sampleRdo.obraId.startsWith("obra-")
-          ? sampleRdo.obraId
-          : "obra-" + Math.random().toString(36).substr(2, 9);
-
-        const restoredObra: ObraConfig = {
-          id: targetObraId,
-          nome: sampleRdo.obra || obraKey,
-          cliente: sampleRdo.cliente || "CLIENTE PRINCIPAL",
-          contratada: sampleRdo.contratada || "SEEL SERVIÇOS DE ENGENHARIA LTDA",
-          gerenciadora: sampleRdo.gerenciadora || "",
-          dataInicio: formattedDataInicio,
-          prazoContratual: sampleRdo.prazo || 365,
-          aditivoPrazo: 0,
-          atividades: uniqueAtividades,
-          subcontratadas: Array.from(subcontratadasSet),
-          permissoes: [],
-          permissoesEmails: [],
-          emissorNomeDefault: sampleRdo.emitenteNome || "",
-          fiscalGerenciadoraNomeDefault: sampleRdo.gerenciadoraNome || "",
-          fiscalAprovadorNomeDefault: sampleRdo.contratanteNome || "",
-          createdAt: new Date().toISOString()
-        };
-
-        // Salvar a obra recuperada
-        await saveObra(restoredObra);
-        setCurrentObra(restoredObra);
-        recoveredObras.push(restoredObra.nome);
-        totalRdosRecovered += rdoList.length;
+      } else if (sampleRdo.inicio.includes("-")) {
+        formattedDataInicio = sampleRdo.inicio;
       }
     }
 
-    if (recoveredObras.length > 0) {
-      await logAction("RESTORE_OBRA", `Obras recuperadas com sucesso: ${recoveredObras.join(", ")} (${totalRdosRecovered} RDOs reativados).`);
+    // Extrair atividades
+    const uniqueAtividades: ObraActivity[] = [];
+    (sampleRdo.atividades || []).forEach((act, idx) => {
+      if (act.descricao) {
+        uniqueAtividades.push({
+          id: `act-rec-${idx}-${Date.now()}`,
+          ref: act.ref || String(idx + 1).padStart(3, "0"),
+          fase: act.fase || "ATIVIDADES PRINCIPAIS",
+          identificador: act.identificador || `1.${idx + 1}`,
+          descricao: act.descricao,
+          unidade: "m³"
+        });
+      }
+    });
+
+    // Extrair subcontratadas
+    const subcontratadasSet = new Set<string>();
+    (sampleRdo.efetivoDetalhado || []).forEach(g => {
+      if (g.nome && !g.nome.toUpperCase().includes("SEEL")) {
+        subcontratadasSet.add(g.nome);
+      }
+    });
+
+    const targetObraId = sampleRdo.obraId && sampleRdo.obraId.startsWith("obra-")
+      ? sampleRdo.obraId
+      : "obra-" + encodeURIComponent((sampleRdo.obra || targetKey).toLowerCase().replace(/[^a-z0-9]/g, "-"));
+
+    const restoredObra: ObraConfig = {
+      id: targetObraId,
+      userId: user.uid,
+      nome: sampleRdo.obra || targetKey,
+      numeroContrato: sampleRdo.contratoNo || "",
+      cliente: sampleRdo.cliente || "CLIENTE PRINCIPAL",
+      contratada: sampleRdo.contratada || "SEEL SERVIÇOS DE ENGENHARIA LTDA",
+      gerenciadora: sampleRdo.gerenciadora || "",
+      dataInicio: formattedDataInicio,
+      prazoContratual: sampleRdo.prazo || 365,
+      aditivoPrazo: 0,
+      atividades: uniqueAtividades,
+      subcontratadas: Array.from(subcontratadasSet),
+      permissoes: [],
+      permissoesEmails: [],
+      emissorNomeDefault: sampleRdo.emitenteNome || "",
+      fiscalGerenciadoraNomeDefault: sampleRdo.gerenciadoraNome || "",
+      fiscalAprovadorNomeDefault: sampleRdo.contratanteNome || "",
+      createdAt: new Date().toISOString()
+    };
+
+    await saveObra(restoredObra);
+    setCurrentObra(restoredObra);
+    await logAction("RESTORE_OBRA", `Obra ${restoredObra.nome} restaurada com sucesso (${matchedRdos.length} RDOs reativados).`);
+
+    return { recoveredObra: restoredObra, totalRdos: matchedRdos.length };
+  };
+
+  const recoverOrphanObras = async (): Promise<{ recoveredObras: string[]; totalRdos: number }> => {
+    const list = await getOrphanObrasList();
+    const recoveredObras: string[] = [];
+    let totalRdos = 0;
+
+    for (const item of list) {
+      try {
+        const res = await recoverSpecificObra(item.key);
+        recoveredObras.push(res.recoveredObra.nome);
+        totalRdos += res.totalRdos;
+      } catch (err) {
+        console.error("Erro ao recuperar obra:", item.key, err);
+      }
     }
 
-    return { recoveredObras, totalRdos: totalRdosRecovered };
+    return { recoveredObras, totalRdos };
   };
 
   const loadReportToEdit = (id: string) => {
@@ -1443,6 +1453,8 @@ export const RdoProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setCurrentObra,
       saveObra,
       deleteObra,
+      getOrphanObrasList,
+      recoverSpecificObra,
       recoverOrphanObras,
       isObrasLoading,
       // Admin
