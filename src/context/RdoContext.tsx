@@ -70,6 +70,13 @@ interface RdoContextType {
   getOrphanObrasList: (currentActiveObras?: ObraConfig[]) => Promise<OrphanObraInfo[]>;
   recoverSpecificObra: (obraKeyOrId: string) => Promise<{ recoveredObra: ObraConfig; totalRdos: number }>;
   recoverOrphanObras: () => Promise<{ recoveredObras: string[]; totalRdos: number }>;
+  restoreBackupData: (
+    rdosToRestore: RdoReport[],
+    obrasToRestore: ObraConfig[],
+    auditLogsToRestore?: AuditLog[],
+    mode?: "merge" | "replace",
+    onProgress?: (current: number, total: number, message: string) => void
+  ) => Promise<{ rdosRestored: number; obrasRestored: number }>;
   isObrasLoading: boolean;
   
   // Admin & Audit
@@ -1422,6 +1429,123 @@ export const RdoProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return { recoveredObras, totalRdos };
   };
 
+  const restoreBackupData = async (
+    rdosToRestore: RdoReport[],
+    obrasToRestore: ObraConfig[],
+    auditLogsToRestore: AuditLog[] = [],
+    mode: "merge" | "replace" = "merge",
+    onProgress?: (current: number, total: number, message: string) => void
+  ): Promise<{ rdosRestored: number; obrasRestored: number }> => {
+    const totalItems = rdosToRestore.length + obrasToRestore.length;
+    let processed = 0;
+
+    onProgress?.(processed, totalItems, "Iniciando processamento do pacote de backup...");
+
+    // 1. Processar e Restaurar Obras
+    const updatedObras: ObraConfig[] = mode === "replace" ? [] : [...obras];
+    let obrasRestored = 0;
+
+    for (const rawObra of obrasToRestore) {
+      if (!rawObra.nome) continue;
+      const obraId = rawObra.id || `obra-${rawObra.nome.toLowerCase().replace(/[^a-z0-9]/g, "-")}`;
+      const cleanObra: ObraConfig = {
+        ...rawObra,
+        id: obraId,
+        userId: user?.uid || rawObra.userId || "admin",
+        contratada: rawObra.contratada || "SEEL SERVIÇOS DE ENGENHARIA LTDA",
+        atividades: rawObra.atividades || [],
+        subcontratadas: rawObra.subcontratadas || [],
+        permissoes: rawObra.permissoes || [],
+        quadroEfetivos: rawObra.quadroEfetivos || [],
+        createdAt: rawObra.createdAt || new Date().toISOString()
+      };
+
+      if (activeIsFirebase && db) {
+        try {
+          await setDoc(doc(db, "obras", obraId), cleanObra, { merge: true });
+        } catch (e) {
+          console.warn("Erro ao gravar obra no Firestore:", obraId, e);
+        }
+      }
+
+      const existingIndex = updatedObras.findIndex(o => o.id === obraId || (o.nome && o.nome.toLowerCase() === cleanObra.nome.toLowerCase()));
+      if (existingIndex >= 0) {
+        updatedObras[existingIndex] = cleanObra;
+      } else {
+        updatedObras.push(cleanObra);
+      }
+
+      obrasRestored++;
+      processed++;
+      onProgress?.(processed, totalItems, `Restaurando obra: ${cleanObra.nome}...`);
+    }
+
+    setObras(updatedObras);
+    localStorage.setItem("rdo_obras_local", JSON.stringify(updatedObras));
+    if (updatedObras.length > 0 && (!currentObra || !updatedObras.some(o => o.id === currentObra.id))) {
+      setCurrentObra(updatedObras[0]);
+    }
+
+    // 2. Processar e Restaurar RDOs
+    const updatedReports: RdoReport[] = mode === "replace" ? [] : [...reports];
+    let rdosRestored = 0;
+
+    for (const rawRdo of rdosToRestore) {
+      if (!rawRdo.rdoNo && !rawRdo.data) continue;
+      const rdoId = rawRdo.id || `rdo-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+      const cleanRdo: RdoReport = {
+        ...rawRdo,
+        id: rdoId,
+        userId: user?.uid || rawRdo.userId || "admin",
+        createdAt: rawRdo.createdAt || new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+
+      if (activeIsFirebase && db) {
+        try {
+          await setDoc(doc(db, "rdos", rdoId), cleanRdo, { merge: true });
+        } catch (e) {
+          console.warn("Erro ao gravar RDO no Firestore:", rdoId, e);
+        }
+      }
+
+      const existingIndex = updatedReports.findIndex(r => r.id === rdoId || (r.rdoNo === cleanRdo.rdoNo && r.obra === cleanRdo.obra && r.data === cleanRdo.data));
+      if (existingIndex >= 0) {
+        updatedReports[existingIndex] = cleanRdo;
+      } else {
+        updatedReports.push(cleanRdo);
+      }
+
+      rdosRestored++;
+      processed++;
+      onProgress?.(processed, totalItems, `Restaurando RDO Nº ${cleanRdo.rdoNo} (${cleanRdo.data || "S/D"})...`);
+    }
+
+    // Ordenar decrescente por data e número
+    updatedReports.sort((a, b) => {
+      const dateCmp = (b.data || "").localeCompare(a.data || "");
+      if (dateCmp !== 0) return dateCmp;
+      return Number(b.rdoNo || 0) - Number(a.rdoNo || 0);
+    });
+
+    setReports(updatedReports);
+    safeSetLocalStorage(LOCAL_REPORTS_KEY, updatedReports);
+
+    if (updatedReports.length > 0) {
+      setCurrentReport(updatedReports[0]);
+    }
+
+    // 3. Auditoria
+    await logAction(
+      "RESTORE_BACKUP_TOTAL",
+      `Restauração concluída: ${rdosRestored} RDO(s) e ${obrasRestored} Obra(s) restaurados com sucesso (Modo: ${mode}).`
+    );
+
+    onProgress?.(totalItems, totalItems, "Restauração finalizada com sucesso!");
+
+    return { rdosRestored, obrasRestored };
+  };
+
   const loadReportToEdit = (id: string) => {
     const report = reports.find(r => r.id === id);
     if (report) {
@@ -1456,6 +1580,7 @@ export const RdoProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       getOrphanObrasList,
       recoverSpecificObra,
       recoverOrphanObras,
+      restoreBackupData,
       isObrasLoading,
       // Admin
       isGlobalAdmin,

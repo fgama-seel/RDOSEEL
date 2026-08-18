@@ -14,19 +14,23 @@ import {
   Zap, 
   RefreshCw,
   Layers,
-  Cpu
+  Cpu,
+  Archive
 } from "lucide-react";
 import { useRdoStore } from "../context/RdoContext";
 import { AuditLog } from "../types";
 import * as XLSX from "xlsx";
 import { saveAs } from "file-saver";
 import firebaseConfig from "../../firebase-applet-config.json";
+import { BackupSubTab } from "./BackupSubTab";
+import { getWeeklyBackupStatus } from "../utils/backupUtils";
 
 export const AuditoriaTab: React.FC = () => {
   const { getAuditLogs, isGlobalAdmin, reports, obras, isFirebase, isLocalFallback } = useRdoStore();
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [activeSubTab, setActiveSubTab] = useState<"logs" | "firebase">("logs");
+  const [activeSubTab, setActiveSubTab] = useState<"logs" | "backup" | "firebase">("logs");
+  const weeklyStatus = getWeeklyBackupStatus();
 
   useEffect(() => {
     if (isGlobalAdmin) {
@@ -115,7 +119,7 @@ export const AuditoriaTab: React.FC = () => {
           <div className="flex bg-slate-200/80 p-0.5 rounded-lg border border-slate-300/60 ml-2">
             <button
               onClick={() => setActiveSubTab("logs")}
-              className={`flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-md transition-all ${
+              className={`flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-md transition-all cursor-pointer ${
                 activeSubTab === "logs"
                   ? "bg-white text-indigo-700 shadow-xs"
                   : "text-slate-600 hover:text-slate-900"
@@ -125,8 +129,22 @@ export const AuditoriaTab: React.FC = () => {
               Logs de Auditoria ({logs.length})
             </button>
             <button
+              onClick={() => setActiveSubTab("backup")}
+              className={`flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-md transition-all cursor-pointer relative ${
+                activeSubTab === "backup"
+                  ? "bg-white text-amber-700 shadow-xs"
+                  : "text-slate-600 hover:text-slate-900"
+              }`}
+            >
+              <Archive className="w-3.5 h-3.5 text-amber-600" />
+              <span>Backup & Redundância</span>
+              {weeklyStatus.isOverdue && (
+                <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+              )}
+            </button>
+            <button
               onClick={() => setActiveSubTab("firebase")}
-              className={`flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-md transition-all ${
+              className={`flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-md transition-all cursor-pointer ${
                 activeSubTab === "firebase"
                   ? "bg-white text-indigo-700 shadow-xs"
                   : "text-slate-600 hover:text-slate-900"
@@ -143,26 +161,31 @@ export const AuditoriaTab: React.FC = () => {
             <button
               onClick={handleExportExcel}
               disabled={logs.length === 0}
-              className="flex items-center gap-1 text-xs font-bold px-3 py-1.5 bg-emerald-600 border border-emerald-700 rounded shadow-xs hover:bg-emerald-700 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="flex items-center gap-1 text-xs font-bold px-3 py-1.5 bg-emerald-600 border border-emerald-700 rounded shadow-xs hover:bg-emerald-700 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
               title="Exportar para Excel"
             >
               <Download className="w-3.5 h-3.5" />
               Excel
             </button>
           )}
-          <button
-            onClick={loadLogs}
-            className="flex items-center gap-1 text-xs font-bold px-3 py-1.5 bg-white border border-slate-300 rounded shadow-xs hover:bg-slate-50 text-slate-700 transition-colors"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? "animate-spin" : ""}`} />
-            Atualizar
-          </button>
+          {activeSubTab === "logs" && (
+            <button
+              onClick={loadLogs}
+              className="flex items-center gap-1 text-xs font-bold px-3 py-1.5 bg-white border border-slate-300 rounded shadow-xs hover:bg-slate-50 text-slate-700 transition-colors cursor-pointer"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? "animate-spin" : ""}`} />
+              Atualizar
+            </button>
+          )}
         </div>
       </div>
       
       {/* CONTEÚDO PRINCIPAL */}
       <div className="flex-1 overflow-y-auto p-4">
-        {activeSubTab === "firebase" ? (
+        {activeSubTab === "backup" ? (
+          /* ABA DE BACKUP & REDUNDÂNCIA */
+          <BackupSubTab />
+        ) : activeSubTab === "firebase" ? (
           /* ABA DE CONSUMO FIREBASE */
           <div className="space-y-5 max-w-5xl mx-auto">
             {/* CARD DE STATUS DA INSTÂNCIA */}
