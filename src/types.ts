@@ -209,7 +209,7 @@ export interface ObraActivity {
 
 export interface ObraPermission {
   email: string;
-  access: "view" | "edit" | "fiscalizacao" | "gerenciadora" | "adm";
+  access: "view" | "edit" | "fiscalizacao" | "gerenciadora" | "adm" | "encarregado";
 }
 
 export interface AuditLog {

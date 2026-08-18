@@ -13,6 +13,7 @@ import { ConsolidatedReports } from "./components/ConsolidatedReports";
 import { AuditoriaTab } from "./components/AuditoriaTab";
 import { BatchSignModal } from "./components/BatchSignModal";
 import { UserManualModal } from "./components/UserManualModal";
+import { FieldView } from "./components/FieldView";
 import { RdoReport } from "./types";
 import { 
   HardHat, 
@@ -33,7 +34,8 @@ import {
   Bell,
   FileSignature,
   AlertTriangle,
-  BookOpen
+  BookOpen,
+  Smartphone
 } from "lucide-react";
 
 // Formatting helper
@@ -75,11 +77,13 @@ function AppContent() {
   const currentUserEmail = user && 'email' in user ? (user.email?.toLowerCase() || "") : "";
   const permission = currentObra?.permissoes?.find(p => p?.email?.toLowerCase() === currentUserEmail);
   const accessLevel = permission ? permission.access : (currentObra?.userId === user?.uid ? "owner" : "view");
+  const isEncarregado = accessLevel === "encarregado";
+  const [isFieldMode, setIsFieldMode] = useState(false);
   const isEditor = isGlobalAdmin || accessLevel === "edit" || accessLevel === "owner";
   const hasQuotaError = Boolean(firebaseError);
 
-  const canManageObras = (isGlobalAdmin || (accessLevel !== "view" && accessLevel !== "fiscalizacao" && accessLevel !== "gerenciadora")) && !hasQuotaError;
-  const canCreateRdo = (isGlobalAdmin || (accessLevel !== "view" && accessLevel !== "fiscalizacao" && accessLevel !== "gerenciadora")) && !hasQuotaError;
+  const canManageObras = (isGlobalAdmin || (accessLevel !== "view" && accessLevel !== "fiscalizacao" && accessLevel !== "gerenciadora" && accessLevel !== "encarregado")) && !hasQuotaError;
+  const canCreateRdo = (isGlobalAdmin || (accessLevel !== "view" && accessLevel !== "fiscalizacao" && accessLevel !== "gerenciadora" && accessLevel !== "encarregado")) && !hasQuotaError;
   const showQuotaNotificationInBell = isEditor && hasQuotaError;
 
   const [searchTerm, setSearchTerm] = useState("");
@@ -201,6 +205,16 @@ function AppContent() {
     }
   };
 
+  // If user is Encarregado or switched to Field Mode, render dedicated single-page Field View
+  if (isEncarregado || isFieldMode) {
+    return (
+      <FieldView
+        canSwitchToFull={!isEncarregado}
+        onSwitchToFullView={() => setIsFieldMode(false)}
+      />
+    );
+  }
+
   return (
     <div className="h-screen bg-slate-50 flex flex-col text-slate-900 font-sans antialiased text-xs overflow-hidden">
       
@@ -257,6 +271,14 @@ function AppContent() {
             >
               <Printer className="w-3.5 h-3.5 text-emerald-600" />
               Imprimir Lote
+            </button>
+            <button
+              onClick={() => setIsFieldMode(true)}
+              className="px-3 h-8 rounded-md text-[10px] font-extrabold uppercase tracking-wider transition-all border-none cursor-pointer flex items-center gap-1.5 text-slate-700 hover:text-amber-700 hover:bg-amber-50 bg-amber-500/10 border border-amber-500/20"
+              title="Alternar para Visão de Campo / Encarregado (Smartphone)"
+            >
+              <Smartphone className="w-3.5 h-3.5 text-amber-600" />
+              Modo Campo
             </button>
             {isGlobalAdmin && (
               <button

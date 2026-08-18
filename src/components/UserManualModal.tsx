@@ -36,7 +36,13 @@ import {
   ArrowRight,
   FolderArchive,
   FileJson,
-  BarChart3
+  BarChart3,
+  Smartphone,
+  Wifi,
+  WifiOff,
+  Copy,
+  RefreshCw,
+  ClipboardList
 } from "lucide-react";
 
 interface UserManualModalProps {
@@ -52,6 +58,7 @@ type ManualSectionId =
   | "assinaturas-lote"
   | "relatorios-impressao"
   | "restauracao-dados"
+  | "campo-mobile"
   | "faq-dicas";
 
 interface ManualTopic {
@@ -115,8 +122,16 @@ const TOPICS: ManualTopic[] = [
     badgeColor: "bg-purple-100 text-purple-900 border-purple-300"
   },
   {
+    id: "campo-mobile",
+    title: "8. Módulo de Campo (Encarregado)",
+    subtitle: "Interface móvel em página única, offline-first e sincronização",
+    icon: Smartphone,
+    badge: "Mobile",
+    badgeColor: "bg-amber-100 text-amber-900 border-amber-300"
+  },
+  {
     id: "faq-dicas",
-    title: "8. Guia Rápido, FAQ & Dicas de Ouro",
+    title: "9. Guia Rápido, FAQ & Dicas de Ouro",
     subtitle: "Soluções práticas de campo, glossário e prevenção de glosas",
     icon: HelpCircle
   }
@@ -809,14 +824,120 @@ export const UserManualModal: React.FC<UserManualModalProps> = ({ isOpen, onClos
             )}
 
             {/* ================================================================= */}
-            {/* CAPÍTULO 8: GUIA RÁPIDO, FAQ & DICAS DE OURO */}
+            {/* CAPÍTULO 8: MÓDULO DE CAMPO & ENCARREGADO (MOBILE) */}
+            {/* ================================================================= */}
+            {activeSection === "campo-mobile" && (
+              <div className="space-y-6 animate-fade-in max-w-3xl">
+                <div className="border-b border-slate-200 pb-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 bg-amber-100 text-amber-800 rounded border border-amber-300">
+                      Capítulo 8
+                    </span>
+                    <span className="text-xs text-slate-500 font-semibold">Operação em Smartphones</span>
+                  </div>
+                  <h2 className="text-xl font-black text-slate-900 flex items-center gap-2 mt-2">
+                    <Smartphone className="w-6 h-6 text-amber-500" />
+                    Módulo de Campo (Visão do Encarregado)
+                  </h2>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Interface simplificada de página única, desenhada sob medida para smartphones e tablets, com preenchimento offline e sincronização ágil.
+                  </p>
+                </div>
+
+                {/* Card de Regra de Negócio & Restrição de Acesso */}
+                <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4.5 space-y-2">
+                  <h4 className="text-xs font-black text-amber-950 flex items-center gap-2">
+                    <ShieldCheck className="w-4 h-4 text-amber-600" />
+                    Regras de Permissão do Usuário Encarregado:
+                  </h4>
+                  <ul className="text-xs text-amber-900 space-y-1.5 list-disc pl-4 leading-relaxed">
+                    <li><strong>Sem Criação de RDO:</strong> O encarregado não pode abrir novos diários. A criação do RDO do dia é de responsabilidade da Engenharia/Gestor da Obra.</li>
+                    <li><strong>Apenas RDOs "Em Digitação":</strong> O encarregado visualiza e edita exclusivamente os relatórios com status <em>"Em Digitação"</em>.</li>
+                    <li><strong>Ocultação Automática:</strong> Assim que o diário é enviado para fiscalização, finalizado ou assinado, ele sai imediatamente da visualização do encarregado para evitar alterações acidentais pós-aprovação.</li>
+                  </ul>
+                </div>
+
+                {/* SEÇÕES DISPONÍVEIS NA TELA DO ENCARREGADO */}
+                <div className="space-y-4">
+                  <h3 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider flex items-center gap-2">
+                    <Layers className="w-4 h-4 text-amber-600" />
+                    O que é Preenchido pelo Time de Campo (Página Única):
+                  </h3>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                    <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-1.5">
+                      <div className="font-extrabold text-slate-900 flex items-center gap-2">
+                        <Calendar className="w-4 h-4 text-amber-600" />
+                        1. Data & Condições de Clima
+                      </div>
+                      <p className="text-slate-600 text-[11px] leading-relaxed">
+                        Seleção por toque dos turnos Manhã, Tarde e Noite (Sol, Nublado, Chuva Leve, Chuva Forte, Impraticável) e registro do índice pluviométrico em mm.
+                      </p>
+                    </div>
+
+                    <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-1.5">
+                      <div className="font-extrabold text-slate-900 flex items-center gap-2">
+                        <Users className="w-4 h-4 text-blue-600" />
+                        2. Quadro de Efetivos & Faltas
+                      </div>
+                      <p className="text-slate-600 text-[11px] leading-relaxed">
+                        Botões de incremento rápidos <strong>(+)</strong> e <strong>(-)</strong> para Cadastrados, Faltas e Atestados, com cálculo de Presentes instantâneo e botão de <strong>Clonar Equipe do RDO anterior</strong>.
+                      </p>
+                    </div>
+
+                    <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-1.5">
+                      <div className="font-extrabold text-slate-900 flex items-center gap-2">
+                        <Wrench className="w-4 h-4 text-sky-600" />
+                        3. Equipamentos Mobilizados
+                      </div>
+                      <p className="text-slate-600 text-[11px] leading-relaxed">
+                        Lançamento rápido de máquinas em operação, identificação de fornecedor/locador e botão para <strong>Clonar Equipamentos</strong> do diário passado.
+                      </p>
+                    </div>
+
+                    <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-1.5">
+                      <div className="font-extrabold text-slate-900 flex items-center gap-2">
+                        <ClipboardList className="w-4 h-4 text-amber-600" />
+                        4. Produção (PQ) & Fotos de Campo
+                      </div>
+                      <p className="text-slate-600 text-[11px] leading-relaxed">
+                        Seleção das frentes cadastradas na Planilha de Quantidades, quantitativo produzido no dia, anotações de campo e captura de fotos direto da câmera do celular.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Como Funciona o Preenchimento Offline & Sincronização */}
+                  <div className="p-4 rounded-xl border border-emerald-200 bg-emerald-50/50 space-y-3">
+                    <h4 className="text-xs font-black text-emerald-950 flex items-center gap-2">
+                      <Wifi className="w-4 h-4 text-emerald-700" />
+                      Funcionamento Offline e Botão de Sincronização:
+                    </h4>
+                    <p className="text-xs text-emerald-900 leading-relaxed">
+                      Mesmo sem sinal de 3G/4G ou Wi-Fi no canteiro de obras, o Encarregado pode realizar todo o preenchimento normalmente. Os dados são gravados no armazenamento local seguro do celular (rascunho local).
+                    </p>
+                    <div className="p-3 bg-white rounded-lg border border-emerald-200 text-[11px] text-emerald-900 space-y-1">
+                      <p className="font-bold flex items-center gap-1.5">
+                        <RefreshCw className="w-3.5 h-3.5 text-emerald-700" /> Passo a Passo de Sincronização:
+                      </p>
+                      <p>1. Preencha as atividades, efetivos e fotos ao longo do dia.</p>
+                      <p>2. Ao retornar para o escritório ou restabelecer conexão com a internet, toque no botão <strong>"Sincronizar Dados"</strong> no rodapé da tela.</p>
+                      <p>3. Uma notificação verde confirmará que os dados foram consolidados na nuvem e já estão disponíveis para o Engenheiro.</p>
+                    </div>
+                  </div>
+
+                </div>
+              </div>
+            )}
+
+            {/* ================================================================= */}
+            {/* CAPÍTULO 9: GUIA RÁPIDO, FAQ & DICAS DE OURO */}
             {/* ================================================================= */}
             {activeSection === "faq-dicas" && (
               <div className="space-y-6 animate-fade-in max-w-3xl">
                 <div className="border-b border-slate-200 pb-4">
                   <div className="flex items-center gap-2">
                     <span className="text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 bg-amber-100 text-amber-800 rounded border border-amber-300">
-                      Capítulo 8
+                      Capítulo 9
                     </span>
                     <span className="text-xs text-slate-500 font-semibold">Resolução Rápida</span>
                   </div>

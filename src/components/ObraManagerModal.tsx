@@ -73,7 +73,7 @@ export const ObraManagerModal: React.FC<ObraManagerModalProps> = ({ isOpen, onCl
   
   // Permission temp fields
   const [newPermEmail, setNewPermEmail] = useState("");
-  const [newPermAccess, setNewPermAccess] = useState<"view" | "edit" | "fiscalizacao" | "gerenciadora">("view");
+  const [newPermAccess, setNewPermAccess] = useState<"view" | "edit" | "fiscalizacao" | "gerenciadora" | "encarregado">("view");
 
   // Activity temp fields
   const [newActRef, setNewActRef] = useState("");
@@ -1099,12 +1099,13 @@ export const ObraManagerModal: React.FC<ObraManagerModalProps> = ({ isOpen, onCl
                 />
                 <select
                   value={newPermAccess}
-                  onChange={(e) => setNewPermAccess(e.target.value as "view" | "edit" | "fiscalizacao" | "gerenciadora")}
+                  onChange={(e) => setNewPermAccess(e.target.value as "view" | "edit" | "fiscalizacao" | "gerenciadora" | "encarregado")}
                   className="bg-white border border-slate-300 rounded p-2 text-xs outline-none focus:ring-1 focus:ring-amber-500 font-semibold"
                 >
-                  <option value="view">Visualização</option>
-                  <option value="edit">Edição</option>
-                  <option value="fiscalizacao">Fiscalização</option>
+                  <option value="view">Visualização (Leitura)</option>
+                  <option value="edit">Edição Geral (Engenheiro)</option>
+                  <option value="encarregado">Encarregado (Equipe de Campo)</option>
+                  <option value="fiscalizacao">Fiscalização (Contratante)</option>
                   <option value="gerenciadora">Gerenciadora</option>
                 </select>
                 <button
@@ -1134,11 +1135,13 @@ export const ObraManagerModal: React.FC<ObraManagerModalProps> = ({ isOpen, onCl
                           <td className="px-3.5 py-2">
                             <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold leading-none ${
                               p.access === "edit" ? "bg-blue-50 text-blue-700 border border-blue-200" :
-                              p.access === "fiscalizacao" ? "bg-amber-50 text-amber-700 border border-amber-200" : 
+                              p.access === "encarregado" ? "bg-amber-50 text-amber-800 border border-amber-300 font-extrabold" :
+                              p.access === "fiscalizacao" ? "bg-purple-50 text-purple-700 border border-purple-200" : 
                               p.access === "gerenciadora" ? "bg-indigo-50 text-indigo-700 border border-indigo-200" :
                               "bg-emerald-50 text-emerald-700 border border-emerald-200"
                             }`}>
-                              {p.access === "edit" ? "EDIÇÃO (ESCRITA)" : 
+                              {p.access === "edit" ? "EDIÇÃO GERAL (ENGENHEIRO)" : 
+                               p.access === "encarregado" ? "ENCARREGADO DE CAMPO" :
                                p.access === "fiscalizacao" ? "FISCALIZAÇÃO" : 
                                p.access === "gerenciadora" ? "GERENCIADORA" :
                                "LEITURA (VISUALIZAÇÃO)"}
