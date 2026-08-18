@@ -17,7 +17,8 @@ import {
   Building2,
   FileSpreadsheet,
   AlertTriangle,
-  Download
+  Download,
+  RotateCcw
 } from "lucide-react";
 
 interface ObraManagerModalProps {
@@ -26,8 +27,9 @@ interface ObraManagerModalProps {
 }
 
 export const ObraManagerModal: React.FC<ObraManagerModalProps> = ({ isOpen, onClose }) => {
-  const { obras, saveObra, deleteObra, currentObra, setCurrentObra, user, firebaseError } = useRdoStore();
+  const { obras, saveObra, deleteObra, recoverOrphanObras, currentObra, setCurrentObra, user, firebaseError } = useRdoStore();
   const isQuotaExceeded = Boolean(firebaseError);
+  const [isRecovering, setIsRecovering] = useState(false);
 
   const [selectedObraId, setSelectedObraId] = useState<string>("");
   const [nome, setNome] = useState("");
@@ -468,6 +470,32 @@ export const ObraManagerModal: React.FC<ObraManagerModalProps> = ({ isOpen, onCl
     }
   };
 
+  const handleRecoverObrasClick = async () => {
+    setIsRecovering(true);
+    setMessage(null);
+    try {
+      const res = await recoverOrphanObras();
+      if (res.recoveredObras.length > 0) {
+        setMessage({
+          text: `🎉 Sucesso! Recuperamos ${res.recoveredObras.length} obra(s) (${res.recoveredObras.join(", ")}) e reativamos ${res.totalRdos} RDO(s) no sistema!`,
+          type: "success"
+        });
+      } else {
+        setMessage({
+          text: "Varredura concluída: Todas as obras vinculadas a RDOs existentes já estão cadastradas e ativas.",
+          type: "success"
+        });
+      }
+    } catch (e: any) {
+      setMessage({
+        text: "Erro durante a recuperação: " + (e.message || e),
+        type: "error"
+      });
+    } finally {
+      setIsRecovering(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl w-full max-w-4xl h-[90vh] flex flex-col shadow-2xl overflow-hidden border border-slate-200">
@@ -510,6 +538,21 @@ export const ObraManagerModal: React.FC<ObraManagerModalProps> = ({ isOpen, onCl
             <div className="border-t border-slate-200 pt-3 mt-1 flex flex-col gap-1 text-[11px] text-slate-500">
               <p className="font-semibold text-slate-700">Dica profissional:</p>
               <p className="leading-relaxed">Preencha o catálogo da obra (atividades e subcontratadas) para que, na criação de diários novos, o sistema complete as tabelas automaticamente sem re-digitar nada.</p>
+            </div>
+
+            {/* Recuperação de Obras / RDOs Antigos */}
+            <div className="border-t border-slate-200 pt-3 flex flex-col gap-2">
+              <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">Recuperação de Dados</span>
+              <button
+                type="button"
+                onClick={handleRecoverObrasClick}
+                disabled={isRecovering}
+                className="w-full py-2 px-2.5 border border-amber-300 text-amber-900 rounded-lg bg-amber-50/80 hover:bg-amber-100/90 transition-all text-xs font-bold flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer disabled:opacity-50"
+                title="Localiza todos os RDOs salvos no banco de dados e restaura automaticamente as obras que foram excluídas"
+              >
+                <RotateCcw className={`w-3.5 h-3.5 text-amber-700 ${isRecovering ? 'animate-spin' : ''}`} />
+                {isRecovering ? "Recuperando..." : "Restaurar Obras dos RDOs"}
+              </button>
             </div>
 
             {selectedObraId !== "new" && (
