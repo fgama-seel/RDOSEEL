@@ -76,7 +76,7 @@ function AppContent() {
 
   const currentUserEmail = user && 'email' in user ? (user.email?.toLowerCase() || "") : "";
   const permission = currentObra?.permissoes?.find(p => p?.email?.toLowerCase() === currentUserEmail);
-  const accessLevel = permission ? permission.access : (currentObra?.userId === user?.uid ? "owner" : "view");
+  const accessLevel = isGlobalAdmin ? "owner" : (permission ? permission.access : (currentObra?.userId === user?.uid ? "owner" : "view"));
   const isEncarregado = accessLevel === "encarregado";
   const [isFieldMode, setIsFieldMode] = useState(false);
   const isEditor = isGlobalAdmin || accessLevel === "edit" || accessLevel === "owner";
@@ -93,7 +93,12 @@ function AppContent() {
   const [showNotificationsPopover, setShowNotificationsPopover] = useState(false);
 
   const notificationReports = (reports || []).filter(r => 
-    r.hasCommentNotification && (!currentObra || r.obraId === currentObra.id)
+    r.hasCommentNotification && (
+      !currentObra || 
+      r.obraId === currentObra.id || 
+      (r.obra && currentObra.nome && r.obra.trim().toLowerCase() === currentObra.nome.trim().toLowerCase()) ||
+      (!r.obraId && currentObra.id === "obra-saneamento-leste")
+    )
   );
   const [showBatchPrint, setShowBatchPrint] = useState(false);
   const [showBatchSignModal, setShowBatchSignModal] = useState(false);
@@ -104,13 +109,17 @@ function AppContent() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
   const [showObraManager, setShowObraManager] = useState(false);
   const [batchPrintMode, setBatchPrintMode] = useState<"single" | "individual">("single");
-  const [batchStatusFilter, setBatchStatusFilter] = useState<"finalizados_assinados" | "todos">("finalizados_assinados");
+  const [batchStatusFilter, setBatchStatusFilter] = useState<"finalizados_assinados" | "todos">("todos");
 
   // Collect reports for the active worksite to print in batch
   const reportsForObraToPrint = React.useMemo(() => {
     return (reports || []).filter(r => {
       if (currentObra) {
-        return r.obraId === currentObra.id;
+        return (
+          r.obraId === currentObra.id ||
+          (r.obra && currentObra.nome && r.obra.trim().toLowerCase() === currentObra.nome.trim().toLowerCase()) ||
+          (!r.obraId && currentObra.id === "obra-saneamento-leste")
+        );
       }
       return true;
     });
@@ -967,6 +976,7 @@ function AppContent() {
         currentObra={currentObra}
         user={user}
         accessLevel={accessLevel}
+        isGlobalAdmin={isGlobalAdmin}
         saveReport={saveReport}
       />
 

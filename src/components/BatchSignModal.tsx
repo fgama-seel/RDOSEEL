@@ -26,6 +26,7 @@ interface BatchSignModalProps {
   currentObra: ObraConfig | null;
   user: any;
   accessLevel: string;
+  isGlobalAdmin?: boolean;
   saveReport: (report: RdoReport) => Promise<void>;
 }
 
@@ -36,6 +37,7 @@ export const BatchSignModal: React.FC<BatchSignModalProps> = ({
   currentObra,
   user,
   accessLevel,
+  isGlobalAdmin = false,
   saveReport
 }) => {
   const { firebaseError } = useRdoStore();
@@ -44,22 +46,35 @@ export const BatchSignModal: React.FC<BatchSignModalProps> = ({
   // 1. Mode state: "nao_assinados" (to batch sign) vs "assinados" (to batch unsign)
   const [filterMode, setFilterMode] = useState<"nao_assinados" | "assinados">("nao_assinados");
 
-  // 2. Signature role automatically determined by access level (user cannot change)
-  const selectedRole = useMemo<SignatureRole>(() => {
+  // Determine if user can freely select signature role (Admins, Owners, Editors)
+  const canSwitchRole = isGlobalAdmin || accessLevel === "owner" || accessLevel === "edit" || accessLevel === "adm";
+
+  // Initial role based on accessLevel
+  const initialRole: SignatureRole = useMemo(() => {
     if (accessLevel === "fiscalizacao") return "contratante";
     if (accessLevel === "gerenciadora") return "gerenciadora";
     return "emitente";
   }, [accessLevel]);
 
+  // Active selected role state
+  const [selectedRole, setSelectedRole] = useState<SignatureRole>(initialRole);
+
+  // Keep selectedRole in sync if accessLevel changes and user cannot switch freely
+  React.useEffect(() => {
+    if (!canSwitchRole) {
+      setSelectedRole(initialRole);
+    }
+  }, [initialRole, canSwitchRole]);
+
   // 3. Signer Name Input
   const defaultSignerName = useMemo(() => {
     if (selectedRole === "emitente") {
-      return currentObra?.emissorNomeDefault || user?.displayName || user?.email || "Engenheiro Responsável";
+      return currentObra?.emissorNomeDefault || user?.displayName || user?.email || "Engenheiro Responsável (SEEL)";
     }
     if (selectedRole === "gerenciadora") {
       return currentObra?.fiscalGerenciadoraNomeDefault || currentObra?.gerenciadora || user?.displayName || user?.email || "Fiscal / Gerenciadora";
     }
-    return currentObra?.fiscalAprovadorNomeDefault || currentObra?.cliente || user?.displayName || user?.email || "Fiscal Contratante";
+    return currentObra?.fiscalContratanteNomeDefault || currentObra?.fiscalAprovadorNomeDefault || currentObra?.cliente || user?.displayName || user?.email || "Fiscal Contratante";
   }, [selectedRole, currentObra, user]);
 
   const [signerName, setSignerName] = useState(defaultSignerName);
@@ -82,10 +97,14 @@ export const BatchSignModal: React.FC<BatchSignModalProps> = ({
   // Feedback toast message state
   const [toastFeedback, setToastFeedback] = useState<{ type: "success" | "error" | "warning"; msg: string } | null>(null);
 
-  // Filter reports belonging to active obra
+  // Filter reports belonging to active obra (robust matching by ID or Name)
   const obraReports = useMemo(() => {
     if (!currentObra) return reports || [];
-    return (reports || []).filter(r => r.obraId === currentObra.id);
+    return (reports || []).filter(r => 
+      r.obraId === currentObra.id || 
+      (r.obra && currentObra.nome && r.obra.trim().toLowerCase() === currentObra.nome.trim().toLowerCase()) ||
+      (!r.obraId && currentObra.id === "obra-saneamento-leste")
+    );
   }, [reports, currentObra]);
 
   // Helper to check if signed for selectedRole
@@ -103,8 +122,8 @@ export const BatchSignModal: React.FC<BatchSignModalProps> = ({
       // Filter mode match
       if (filterMode === "nao_assinados") {
         if (signed) return false;
-        // For fiscalização / gerenciadora, only show RDOs where emitente signed first
-        if (selectedRole !== "emitente" && !r.emitenteAssinado) {
+        // For non-admins signing as fiscalização / gerenciadora, optionally check if emitente signed first
+        if (!canSwitchRole && selectedRole !== "emitente" && !r.emitenteAssinado) {
           return false;
         }
       }
@@ -127,7 +146,7 @@ export const BatchSignModal: React.FC<BatchSignModalProps> = ({
 
       return true;
     }).sort((a, b) => (a.data || "").localeCompare(b.data || ""));
-  }, [obraReports, filterMode, selectedRole, startDate, endDate, searchQuery]);
+  }, [obraReports, filterMode, selectedRole, canSwitchRole, startDate, endDate, searchQuery]);
 
   // Reset selections when filters change
   React.useEffect(() => {
@@ -433,15 +452,56 @@ export const BatchSignModal: React.FC<BatchSignModalProps> = ({
               </button>
             </div>
 
-            {/* Role indicator (read-only based on user permissions) */}
-            <div className="flex items-center gap-2 bg-slate-100 px-3 py-1.5 rounded-xl border border-slate-200">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 shrink-0">
-                Papel Signatário:
-              </span>
-              <span className="text-xs font-black text-slate-900 uppercase">
-                {roleLabelMap[selectedRole]}
-              </span>
-            </div>
+            {/* Role indicator / selector */}
+            {canSwitchRole ? (
+              <div className="flex items-center gap-1 bg-slate-200/80 p-1 rounded-xl">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 px-2 shrink-0">
+                  Assinar como:
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setSelectedRole("emitente")}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-extrabold uppercase tracking-tight transition-all border-none cursor-pointer ${
+                    selectedRole === "emitente"
+                      ? "bg-[#004899] text-white shadow-xs"
+                      : "text-slate-700 hover:text-slate-950 hover:bg-slate-300/50"
+                  }`}
+                >
+                  SEEL (Emitente)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedRole("gerenciadora")}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-extrabold uppercase tracking-tight transition-all border-none cursor-pointer ${
+                    selectedRole === "gerenciadora"
+                      ? "bg-purple-700 text-white shadow-xs"
+                      : "text-slate-700 hover:text-slate-950 hover:bg-slate-300/50"
+                  }`}
+                >
+                  Gerenciadora
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedRole("contratante")}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-extrabold uppercase tracking-tight transition-all border-none cursor-pointer ${
+                    selectedRole === "contratante"
+                      ? "bg-emerald-700 text-white shadow-xs"
+                      : "text-slate-700 hover:text-slate-950 hover:bg-slate-300/50"
+                  }`}
+                >
+                  Fiscal Contratante
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 bg-slate-100 px-3 py-1.5 rounded-xl border border-slate-200">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 shrink-0">
+                  Papel Signatário:
+                </span>
+                <span className="text-xs font-black text-slate-900 uppercase">
+                  {roleLabelMap[selectedRole]}
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Row 2: Signer Name input & Date Range Filters */}

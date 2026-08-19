@@ -96,7 +96,11 @@ const SingleReportPrint: React.FC<{ report: RdoReport }> = ({ report }) => {
   const { obras, reports } = useRdoStore();
   
   // Find current Obra object from store to populate missing contract / Obra details
-  const currentObra = obras.find(o => o.id === report.obraId || o.nome === report.obra);
+  const currentObra = obras.find(o => 
+    o.id === report.obraId || 
+    (o.nome && report.obra && o.nome.trim().toLowerCase() === report.obra.trim().toLowerCase()) ||
+    (!report.obraId && o.id === "obra-saneamento-leste")
+  );
 
   const obraNome = report.obra || currentObra?.nome || "OBRA NÃO IDENTIFICADA";
   const contratoNo = currentObra?.numeroContrato || report.contratoNo || "-";
@@ -277,36 +281,61 @@ const SingleReportPrint: React.FC<{ report: RdoReport }> = ({ report }) => {
   );
 
   // Header component
-  const PrintHeader: React.FC = () => (
-    <div className="border-b-2 border-[#004899] pb-2 flex justify-between items-center mb-2">
-      <div className="flex items-center gap-3">
-        {currentObra?.logoUrl ? (
-          <img src={currentObra.logoUrl} alt="Logo Obra" className="h-10 max-w-32 object-contain" />
-        ) : (
-          <div className="h-10 w-24 bg-[#004899] text-white flex items-center justify-center font-bold text-xs rounded tracking-wider">
-            SEEL
-          </div>
-        )}
-        <div className="border-l border-gray-300 pl-3">
-          <h1 className="text-sm font-extrabold text-[#004899] uppercase tracking-wide">
-            RELATÓRIO DIÁRIO DE OBRA (RDO)
-          </h1>
-          <p className="text-[9px] font-bold text-gray-600 uppercase">
-            {obraNome}
-          </p>
-        </div>
-      </div>
+  const PrintHeader: React.FC = () => {
+    // SEEL logo: check currentObra.logoSeel, report.logoSeel, currentObra.logoUrl, (report as any).logoContratada
+    const seelLogoSrc = currentObra?.logoSeel || (report as any)?.logoSeel || (report as any)?.logoContratada || currentObra?.logoUrl;
+    
+    // SABESP / Cliente logo: check currentObra.logoCliente, (report as any)?.logoCliente
+    const clienteLogoSrc = currentObra?.logoCliente || (report as any)?.logoCliente;
 
-      <div className="text-right">
-        <div className="text-xs font-black text-[#004899] bg-blue-50 border border-blue-200 px-2.5 py-0.5 rounded font-mono inline-block">
-          {report.rdoNo.toUpperCase().startsWith("RDO") ? report.rdoNo : `RDO-${report.rdoNo}`}
+    return (
+      <div className="border-b-2 border-[#004899] pb-2 flex justify-between items-center mb-2 gap-3">
+        {/* Left Side: SEEL Logo & Title */}
+        <div className="flex items-center gap-3 min-w-0 flex-1">
+          {seelLogoSrc ? (
+            <img 
+              src={seelLogoSrc} 
+              alt="Logo Contratada SEEL" 
+              className="h-10 max-w-[130px] max-h-10 object-contain shrink-0" 
+            />
+          ) : (
+            <div className="h-9 px-3 bg-[#004899] text-white flex items-center justify-center font-black text-xs rounded tracking-wider uppercase shrink-0">
+              SEEL
+            </div>
+          )}
+          
+          <div className="border-l border-gray-300 pl-3 min-w-0">
+            <h1 className="text-xs sm:text-sm font-extrabold text-[#004899] uppercase tracking-wide truncate">
+              RELATÓRIO DIÁRIO DE OBRA (RDO)
+            </h1>
+            <p className="text-[9px] font-bold text-gray-600 uppercase truncate">
+              {obraNome}
+            </p>
+          </div>
         </div>
-        <p className="text-[9px] font-bold text-gray-700 mt-0.5 font-mono">
-          DATA: {formatPrintDate(report.data)}
-        </p>
+
+        {/* Right Side: SABESP / Cliente Logo + RDO Number & Date */}
+        <div className="flex items-center gap-3 shrink-0 text-right">
+          {clienteLogoSrc && (
+            <img 
+              src={clienteLogoSrc} 
+              alt="Logo Contratante / SABESP" 
+              className="h-10 max-w-[130px] max-h-10 object-contain shrink-0" 
+            />
+          )}
+
+          <div className="flex flex-col items-end">
+            <div className="text-xs font-black text-[#004899] bg-blue-50 border border-blue-200 px-2.5 py-0.5 rounded font-mono inline-block">
+              {report.rdoNo.toUpperCase().startsWith("RDO") ? report.rdoNo : `RDO-${report.rdoNo}`}
+            </div>
+            <p className="text-[9px] font-bold text-gray-700 mt-0.5 font-mono">
+              DATA: {formatPrintDate(report.data)}
+            </p>
+          </div>
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   // Complete Report Info Block (Obra Details)
   const ReportInfoBlock: React.FC = () => (

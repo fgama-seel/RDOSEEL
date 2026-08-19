@@ -56,7 +56,7 @@ export const ConsolidatedReports: React.FC = () => {
 
   const currentUserEmail = user && 'email' in user ? (user.email?.toLowerCase() || "") : "";
   const permission = currentObra?.permissoes?.find(p => p?.email?.toLowerCase() === currentUserEmail);
-  const accessLevel = permission ? permission.access : (currentObra?.userId === user?.uid ? "owner" : "view");
+  const accessLevel = isGlobalAdmin ? "owner" : (permission ? permission.access : (currentObra?.userId === user?.uid ? "owner" : "view"));
   const canEditAccess = (isGlobalAdmin || (accessLevel !== "view" && accessLevel !== "fiscalizacao" && accessLevel !== "gerenciadora")) && !firebaseError;
 
   // Date Range States
