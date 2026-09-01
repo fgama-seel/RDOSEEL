@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { 
   RdoReport, 
   Activity, 
@@ -200,7 +200,65 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
     } as RdoReport);
   };
 
-  const associatedObra = obras.find(o => o.id === currentReport.obraId || o.nome === currentReport.obra);
+  const associatedObra = obras.find(o => 
+    o.id === currentReport.obraId || 
+    (o.nome && currentReport.obra && o.nome.trim().toLowerCase() === currentReport.obra.trim().toLowerCase())
+  );
+
+  const obraTotalDays = associatedObra ? (Number(associatedObra.prazoContratual || 0) + Number(associatedObra.aditivoPrazo || 0)) : 0;
+
+  const handleSyncObraPrazo = () => {
+    if (!associatedObra) return;
+    const totalDays = Number(associatedObra.prazoContratual || 0) + Number(associatedObra.aditivoPrazo || 0);
+    const startDate = associatedObra.dataInicio || currentReport.inicio || "";
+    const formattedInicio = startDate.includes("-") ? startDate.split("-").reverse().join("/") : startDate;
+    const incorrido = calculatePrazoIncorrido(currentReport.data, formattedInicio) ?? Number(currentReport.prazoIncorrido || 0);
+    const faltante = Math.max(0, totalDays - incorrido);
+    
+    let formattedTermino = currentReport.termino;
+    if (associatedObra.dataInicio) {
+      try {
+        const d = new Date(associatedObra.dataInicio + "T12:00:00");
+        d.setDate(d.getDate() + totalDays);
+        formattedTermino = d.toLocaleDateString("pt-BR");
+      } catch (e) {}
+    }
+
+    updateReport({
+      prazo: totalDays,
+      prazoIncorrido: incorrido,
+      prazoFaltante: faltante,
+      inicio: formattedInicio,
+      termino: formattedTermino
+    });
+  };
+
+  // Auto-sync prazo if report has empty or 0 prazo
+  useEffect(() => {
+    if (currentReport && associatedObra && (!currentReport.prazo || currentReport.prazo === 0) && obraTotalDays > 0) {
+      const startDate = associatedObra.dataInicio || currentReport.inicio || "";
+      const formattedInicio = startDate.includes("-") ? startDate.split("-").reverse().join("/") : startDate;
+      const incorrido = calculatePrazoIncorrido(currentReport.data, formattedInicio) ?? Number(currentReport.prazoIncorrido || 0);
+      const faltante = Math.max(0, obraTotalDays - incorrido);
+      
+      let formattedTermino = currentReport.termino;
+      if (associatedObra.dataInicio) {
+        try {
+          const d = new Date(associatedObra.dataInicio + "T12:00:00");
+          d.setDate(d.getDate() + obraTotalDays);
+          formattedTermino = d.toLocaleDateString("pt-BR");
+        } catch (e) {}
+      }
+
+      updateReport({
+        prazo: obraTotalDays,
+        prazoIncorrido: incorrido,
+        prazoFaltante: faltante,
+        inicio: formattedInicio,
+        termino: formattedTermino
+      });
+    }
+  }, [currentReport?.id, currentReport?.obraId, currentReport?.obra, associatedObra?.id, obraTotalDays]);
 
   const displayEmitenteNome = currentReport.emitenteAssinado
     ? (currentReport.emitenteNome || associatedObra?.emissorNomeDefault || "")
@@ -1190,15 +1248,37 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
               </div>
             </div>
 
-            <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider border-b border-slate-200 pb-1.5 pt-2 font-sans">Prazo Técnico e Cronograma</h3>
+            <div className="flex items-center justify-between border-b border-slate-200 pb-1.5 pt-2">
+              <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider font-sans">Prazo Técnico e Cronograma</h3>
+              {associatedObra && obraTotalDays > 0 && (
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-slate-500 font-semibold hidden sm:inline">
+                    Gerenciar Obras: <strong className="text-slate-800 font-mono">{obraTotalDays} dias</strong> ({associatedObra.prazoContratual}d + {associatedObra.aditivoPrazo}d aditivo)
+                  </span>
+                  {currentReport.prazo !== obraTotalDays && (
+                    <button
+                      type="button"
+                      onClick={handleSyncObraPrazo}
+                      className="px-2 py-0.5 bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 rounded text-[10px] font-bold uppercase transition-colors cursor-pointer"
+                      title="Sincronizar prazo total e datas com as configurações do Gerenciador de Obras"
+                    >
+                      Sincronizar da Obra
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
               <div>
-                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-tight mb-1">Prazo Total (dias)</label>
+                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-tight mb-1">
+                  Prazo Total (dias)
+                </label>
                 <input
                   type="number"
-                  value={currentReport.prazo}
+                  value={currentReport.prazo || obraTotalDays || ""}
                   onChange={(e) => updateReport({ prazo: Number(e.target.value) })}
-                  className="block h-8 w-full rounded border-slate-300 text-xs text-slate-800 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 bg-slate-50/40 font-mono"
+                  className="block h-8 w-full rounded border-slate-300 text-xs text-slate-800 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 bg-slate-50/40 font-mono font-bold"
                 />
               </div>
 
@@ -1217,7 +1297,7 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
                 <input
                   type="text"
                   disabled
-                  value={`${Math.max(0, (currentReport.prazo || 0) - (currentReport.prazoIncorrido || 0))} dias`}
+                  value={`${Math.max(0, (currentReport.prazo || obraTotalDays || 0) - (currentReport.prazoIncorrido || 0))} dias`}
                   className="block h-8 w-full rounded bg-slate-100 border-slate-200 font-bold text-slate-600 text-xs font-mono"
                 />
               </div>

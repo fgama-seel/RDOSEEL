@@ -111,12 +111,22 @@ const SingleReportPrint: React.FC<{ report: RdoReport }> = ({ report }) => {
   const inicioDate = currentObra?.dataInicio 
     ? new Date(currentObra.dataInicio + "T12:00:00").toLocaleDateString("pt-BR")
     : (report.inicio || "-");
-  const terminoDate = report.termino || "-";
-  const prazoTotal = currentObra 
+  const obraTotalDays = currentObra 
     ? (Number(currentObra.prazoContratual || 0) + Number(currentObra.aditivoPrazo || 0))
-    : Number(report.prazo || 0);
+    : 0;
+  const prazoTotal = obraTotalDays > 0 ? obraTotalDays : (Number(report.prazo || 0) || 0);
   const prazoIncorrido = Number(report.prazoIncorrido || 0);
   const prazoRemanescente = Math.max(0, prazoTotal - prazoIncorrido);
+
+  let calculatedEndFormatted = "-";
+  if (currentObra?.dataInicio && obraTotalDays > 0) {
+    try {
+      const d = new Date(currentObra.dataInicio + "T12:00:00");
+      d.setDate(d.getDate() + obraTotalDays);
+      calculatedEndFormatted = d.toLocaleDateString("pt-BR");
+    } catch (e) {}
+  }
+  const terminoDate = report.termino || calculatedEndFormatted;
 
   const displayEmitenteNome = report.emitenteAssinado
     ? (report.emitenteNome || currentObra?.emissorNomeDefault || "")

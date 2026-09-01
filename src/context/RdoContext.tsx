@@ -777,18 +777,37 @@ export const RdoProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         nextRdoNo = `${lastRdo.rdoNo || "RDO"}-01`;
       }
 
-      // 4. Calcula os prazos contratuais para o novo dia
-      const totalPeriodDays = currentObra
-        ? Number(currentObra.prazoContratual || 0) + Number(currentObra.aditivoPrazo || 0)
-        : Number(lastRdo.prazo || 365);
+      // 4. Localiza a Obra correspondente para herdar os prazos e informações do Gerenciador de Obras
+      const matchedObra = currentObra || (obras || []).find(o => 
+        o.id === lastRdo.obraId || 
+        (o.nome && lastRdo.obra && o.nome.trim().toLowerCase() === lastRdo.obra.trim().toLowerCase())
+      );
 
-      const startDateRef = currentObra?.dataInicio || lastRdo.inicio || "";
+      const obraTotalDays = matchedObra 
+        ? (Number(matchedObra.prazoContratual || 0) + Number(matchedObra.aditivoPrazo || 0)) 
+        : 0;
+
+      const totalPeriodDays = obraTotalDays > 0 ? obraTotalDays : (Number(lastRdo.prazo || 0) || 365);
+
+      const startDateRef = matchedObra?.dataInicio || lastRdo.inicio || "";
       const { incorrido, faltante } = startDateRef && startDateRef.includes("-")
         ? computeProjectDays(startDateRef, nextDateStr, totalPeriodDays)
         : {
             incorrido: Number(lastRdo.prazoIncorrido || 0) + 1,
             faltante: Math.max(0, totalPeriodDays - (Number(lastRdo.prazoIncorrido || 0) + 1))
           };
+
+      const calculatedEnd = matchedObra && matchedObra.dataInicio 
+        ? calculateEndDate(matchedObra.dataInicio, matchedObra.prazoContratual, matchedObra.aditivoPrazo)
+        : "";
+
+      const formattedInicio = matchedObra?.dataInicio
+        ? matchedObra.dataInicio.split("-").reverse().join("/")
+        : (lastRdo.inicio || "");
+
+      const formattedTermino = calculatedEnd
+        ? calculatedEnd.split("-").reverse().join("/")
+        : (lastRdo.termino || "");
 
       // 5. Clonagem profunda (Deep Copy) de todos os dados do RDO anterior
       const clonedRdo: RdoReport = JSON.parse(JSON.stringify(lastRdo));
@@ -799,15 +818,17 @@ export const RdoProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         rdoNo: nextRdoNo,
         data: nextDateStr,
         status: "Em Digitação",
-        obra: currentObra?.nome || lastRdo.obra,
-        obraId: currentObra?.id || lastRdo.obraId,
-        cliente: currentObra?.cliente || lastRdo.cliente,
-        contratada: currentObra?.contratada || lastRdo.contratada || "SEEL SERVIÇOS DE ENGENHARIA LTDA",
-        gerenciadora: currentObra?.gerenciadora || lastRdo.gerenciadora,
+        obra: matchedObra?.nome || lastRdo.obra,
+        obraId: matchedObra?.id || lastRdo.obraId,
+        cliente: matchedObra?.cliente || lastRdo.cliente,
+        contratada: matchedObra?.contratada || lastRdo.contratada || "SEEL SERVIÇOS DE ENGENHARIA LTDA",
+        gerenciadora: matchedObra?.gerenciadora || lastRdo.gerenciadora,
         creatorEmail: user?.email || lastRdo.creatorEmail || "",
         prazo: totalPeriodDays,
         prazoIncorrido: incorrido,
         prazoFaltante: faltante,
+        inicio: formattedInicio,
+        termino: formattedTermino,
         // Limpar status de assinaturas e validações para o novo RDO aberto
         fiscalizacaoFinalizada: false,
         gerenciadoraFinalizada: false,
@@ -820,9 +841,9 @@ export const RdoProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         gerenciadoraHash: "",
         contratanteAprovado: "",
         contratanteHash: "",
-        emitenteNome: currentObra?.emissorNomeDefault || lastRdo.emitenteNome || "",
-        gerenciadoraNome: currentObra?.fiscalGerenciadoraNomeDefault || lastRdo.gerenciadoraNome || "",
-        contratanteNome: currentObra?.fiscalContratanteNomeDefault || currentObra?.fiscalAprovadorNomeDefault || lastRdo.contratanteNome || "",
+        emitenteNome: matchedObra?.emissorNomeDefault || lastRdo.emitenteNome || "",
+        gerenciadoraNome: matchedObra?.fiscalGerenciadoraNomeDefault || lastRdo.gerenciadoraNome || "",
+        contratanteNome: matchedObra?.fiscalContratanteNomeDefault || matchedObra?.fiscalAprovadorNomeDefault || lastRdo.contratanteNome || "",
         createdAt: undefined,
         updatedAt: undefined
       };
@@ -1098,6 +1119,45 @@ export const RdoProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (updatedR.contratanteNome !== (obraToSave.fiscalAprovadorNomeDefault || "")) {
           updatedR.contratanteNome = obraToSave.fiscalAprovadorNomeDefault || "";
           rChanged = true;
+        }
+      }
+
+      // 4. Prazos Contratuais & Vigências: Sincroniza do Gerenciar Obras para RDOs não finalizados/não assinados
+      if (r.status !== "Finalizado" && r.status !== "Assinado") {
+        const totalPrazoObra = Number(obraToSave.prazoContratual || 0) + Number(obraToSave.aditivoPrazo || 0);
+        if (totalPrazoObra > 0 && updatedR.prazo !== totalPrazoObra) {
+          updatedR.prazo = totalPrazoObra;
+          rChanged = true;
+        }
+
+        if (obraToSave.dataInicio) {
+          const formattedInicio = obraToSave.dataInicio.split("-").reverse().join("/");
+          if (updatedR.inicio !== formattedInicio) {
+            updatedR.inicio = formattedInicio;
+            rChanged = true;
+          }
+
+          const calculatedEnd = calculateEndDate(obraToSave.dataInicio, obraToSave.prazoContratual, obraToSave.aditivoPrazo);
+          if (calculatedEnd) {
+            const formattedTermino = calculatedEnd.split("-").reverse().join("/");
+            if (updatedR.termino !== formattedTermino) {
+              updatedR.termino = formattedTermino;
+              rChanged = true;
+            }
+          }
+
+          if (updatedR.data) {
+            const { incorrido, faltante } = computeProjectDays(
+              obraToSave.dataInicio,
+              updatedR.data,
+              totalPrazoObra > 0 ? totalPrazoObra : (updatedR.prazo || 365)
+            );
+            if (updatedR.prazoIncorrido !== incorrido || updatedR.prazoFaltante !== faltante) {
+              updatedR.prazoIncorrido = incorrido;
+              updatedR.prazoFaltante = faltante;
+              rChanged = true;
+            }
+          }
         }
       }
 
