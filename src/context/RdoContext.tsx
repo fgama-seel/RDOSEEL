@@ -724,140 +724,121 @@ export const RdoProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  // Create template report helper
+  // Create template report helper - Cria uma cópia exata do RDO anterior incrementando +1 dia
   const createNewReport = (): RdoReport => {
+    // 1. Localizar todos os RDOs candidatos para a obra ativa ou para o sistema
+    const candidateReports = (reports || []).filter(r => {
+      if (currentObra) {
+        return (
+          r.obraId === currentObra.id ||
+          (r.obra && currentObra.nome && r.obra.trim().toLowerCase() === currentObra.nome.trim().toLowerCase()) ||
+          (!r.obraId && currentObra.id === "obra-saneamento-leste")
+        );
+      }
+      return true;
+    });
+
+    // Se houver RDOs para a obra atual (ou gerais no sistema), pega o RDO mais recente
+    const baseReports = candidateReports.length > 0 ? candidateReports : (reports || []);
+
+    if (baseReports.length > 0) {
+      // Ordena decrescente por data e por numeração para obter o último RDO exato
+      const sorted = [...baseReports].sort((a, b) => {
+        const dateComp = (b.data || "").localeCompare(a.data || "");
+        if (dateComp !== 0) return dateComp;
+        return (b.rdoNo || "").localeCompare(a.rdoNo || "", undefined, { numeric: true });
+      });
+      const lastRdo = sorted[0];
+
+      // 2. Calcula a nova data: estritamente o dia seguinte ao último RDO (+1 dia)
+      let nextDateStr = "";
+      if (lastRdo.data && lastRdo.data.includes("-")) {
+        const [yStr, mStr, dStr] = lastRdo.data.split("-");
+        const prevDate = new Date(parseInt(yStr, 10), parseInt(mStr, 10) - 1, parseInt(dStr, 10), 12, 0, 0);
+        prevDate.setDate(prevDate.getDate() + 1);
+        const yNext = prevDate.getFullYear();
+        const mNext = String(prevDate.getMonth() + 1).padStart(2, "0");
+        const dNext = String(prevDate.getDate()).padStart(2, "0");
+        nextDateStr = `${yNext}-${mNext}-${dNext}`;
+      } else {
+        const today = new Date();
+        nextDateStr = today.toISOString().split("T")[0];
+      }
+
+      // 3. Incrementa a numeração do RDO (ex: RDO-005 -> RDO-006, 010 -> 011)
+      let nextRdoNo = "";
+      const matchDigits = (lastRdo.rdoNo || "").match(/^(.*?)(\d+)$/);
+      if (matchDigits) {
+        const prefix = matchDigits[1];
+        const digits = matchDigits[2];
+        const nextVal = (parseInt(digits, 10) + 1).toString().padStart(digits.length, "0");
+        nextRdoNo = prefix + nextVal;
+      } else {
+        nextRdoNo = `${lastRdo.rdoNo || "RDO"}-01`;
+      }
+
+      // 4. Calcula os prazos contratuais para o novo dia
+      const totalPeriodDays = currentObra
+        ? Number(currentObra.prazoContratual || 0) + Number(currentObra.aditivoPrazo || 0)
+        : Number(lastRdo.prazo || 365);
+
+      const startDateRef = currentObra?.dataInicio || lastRdo.inicio || "";
+      const { incorrido, faltante } = startDateRef && startDateRef.includes("-")
+        ? computeProjectDays(startDateRef, nextDateStr, totalPeriodDays)
+        : {
+            incorrido: Number(lastRdo.prazoIncorrido || 0) + 1,
+            faltante: Math.max(0, totalPeriodDays - (Number(lastRdo.prazoIncorrido || 0) + 1))
+          };
+
+      // 5. Clonagem profunda (Deep Copy) de todos os dados do RDO anterior
+      const clonedRdo: RdoReport = JSON.parse(JSON.stringify(lastRdo));
+
+      return {
+        ...clonedRdo,
+        id: undefined, // Gera novo ID exclusivo ao salvar
+        rdoNo: nextRdoNo,
+        data: nextDateStr,
+        status: "Em Digitação",
+        obra: currentObra?.nome || lastRdo.obra,
+        obraId: currentObra?.id || lastRdo.obraId,
+        cliente: currentObra?.cliente || lastRdo.cliente,
+        contratada: currentObra?.contratada || lastRdo.contratada || "SEEL SERVIÇOS DE ENGENHARIA LTDA",
+        gerenciadora: currentObra?.gerenciadora || lastRdo.gerenciadora,
+        creatorEmail: user?.email || lastRdo.creatorEmail || "",
+        prazo: totalPeriodDays,
+        prazoIncorrido: incorrido,
+        prazoFaltante: faltante,
+        // Limpar status de assinaturas e validações para o novo RDO aberto
+        fiscalizacaoFinalizada: false,
+        gerenciadoraFinalizada: false,
+        emitenteAssinado: false,
+        gerenciadoraAssinado: false,
+        contratanteAssinado: false,
+        emitenteConsolidado: "",
+        emitenteHash: "",
+        gerenciadoraConsolidado: "",
+        gerenciadoraHash: "",
+        contratanteAprovado: "",
+        contratanteHash: "",
+        emitenteNome: currentObra?.emissorNomeDefault || lastRdo.emitenteNome || "",
+        gerenciadoraNome: currentObra?.fiscalGerenciadoraNomeDefault || lastRdo.gerenciadoraNome || "",
+        contratanteNome: currentObra?.fiscalContratanteNomeDefault || currentObra?.fiscalAprovadorNomeDefault || lastRdo.contratanteNome || "",
+        createdAt: undefined,
+        updatedAt: undefined
+      };
+    }
+
+    // Caso seja a primeira inicialização absoluta sem nenhum RDO anterior no sistema
     let todayStr = new Date().toISOString().split("T")[0];
     
-    // Obter data mais recente dos relatos da obra atual ou globais
-    const targetReports = currentObra 
-      ? reports.filter(r => r.obraId === currentObra.id)
-      : reports;
-    
-    if (targetReports.length > 0) {
-      const sorted = [...targetReports].sort((a, b) => b.data.localeCompare(a.data));
-      const latestData = sorted[0].data;
-      try {
-        const d = new Date(latestData + "T12:00:00");
-        d.setDate(d.getDate() + 1);
-        todayStr = d.toISOString().split("T")[0];
-      } catch (e) {
-        console.error("Erro ao incrementar data de RDO:", e);
-      }
-    } else if (reports.length > 0) {
-      const sorted = [...reports].sort((a, b) => b.data.localeCompare(a.data));
-      const latestData = sorted[0].data;
-      try {
-        const d = new Date(latestData + "T12:00:00");
-        d.setDate(d.getDate() + 1);
-        todayStr = d.toISOString().split("T")[0];
-      } catch (e) {
-        console.error("Erro ao incrementar data de RDO:", e);
-      }
-    }
-    
     const defaultStoppages: StoppagesDetail = {
-      chuva: {
-        ativo: false,
-        horas: [],
-        frentes: "Todas as frentes",
-        local: "Geral",
-        maoDeObraParalisada: "Todas as equipes",
-        comentarios: "",
-        total: "0h"
-      },
-      raios: {
-        ativo: false,
-        horas: [],
-        frentes: "Todas as frentes",
-        local: "",
-        maoDeObraParalisada: "",
-        comentarios: "",
-        total: "0h"
-      },
-      projetos: {
-        ativo: false,
-        horas: [],
-        frentes: "",
-        local: "",
-        maoDeObraParalisada: "",
-        comentarios: "",
-        total: "0h"
-      },
-      vizinhos: {
-        ativo: false,
-        horas: [],
-        frentes: "",
-        local: "",
-        maoDeObraParalisada: "",
-        comentarios: "",
-        total: "0h"
-      },
-      outros: {
-        ativo: false,
-        horas: [],
-        frentes: "",
-        local: "",
-        maoDeObraParalisada: "",
-        comentarios: "",
-        total: "0h"
-      }
+      chuva: { ativo: false, horas: [], frentes: "Todas as frentes", local: "Geral", maoDeObraParalisada: "Todas as equipes", comentarios: "", total: "0h" },
+      raios: { ativo: false, horas: [], frentes: "Todas as frentes", local: "", maoDeObraParalisada: "", comentarios: "", total: "0h" },
+      projetos: { ativo: false, horas: [], frentes: "", local: "", maoDeObraParalisada: "", comentarios: "", total: "0h" },
+      vizinhos: { ativo: false, horas: [], frentes: "", local: "", maoDeObraParalisada: "", comentarios: "", total: "0h" },
+      outros: { ativo: false, horas: [], frentes: "", local: "", maoDeObraParalisada: "", comentarios: "", total: "0h" }
     };
 
-    // Requirement 3: Copy information from previous RDO if possible
-    if (currentObra) {
-      const matchedReports = reports.filter(r => r.obraId === currentObra.id);
-      if (matchedReports.length > 0) {
-        // Sort descending by date to get the absolute previous RDO
-        const sorted = [...matchedReports].sort((a, b) => b.data.localeCompare(a.data));
-        const lastRdo = sorted[0];
-
-        // Compute incremental report number
-        let nextRdoNo = lastRdo.rdoNo;
-        const matchDigits = lastRdo.rdoNo.match(/^(.*?)(\d+)$/);
-        if (matchDigits) {
-          const prefix = matchDigits[1];
-          const digits = matchDigits[2];
-          const nextVal = (parseInt(digits, 10) + 1).toString().padStart(digits.length, "0");
-          nextRdoNo = prefix + nextVal;
-        } else {
-          nextRdoNo = lastRdo.rdoNo + "-1";
-        }
-
-        // Calculate current elapsed days based on the new RDO's date
-        const totalPeriodDays = Number(currentObra.prazoContratual || 0) + Number(currentObra.aditivoPrazo || 0);
-        const { incorrido, faltante } = computeProjectDays(currentObra.dataInicio, todayStr, totalPeriodDays);
-
-        return {
-          ...lastRdo,
-          id: undefined, // Let it generate a new id on saving
-          rdoNo: nextRdoNo,
-          data: todayStr,
-          status: "Em Digitação",
-          creatorEmail: user?.email || "",
-          fiscalizacaoFinalizada: false,
-          gerenciadoraFinalizada: false,
-          emitenteAssinado: false,
-          gerenciadoraAssinado: false,
-          contratanteAssinado: false,
-          prazoIncorrido: incorrido,
-          prazoFaltante: faltante,
-          // Reset signature parameters with current default names for new RDOs
-          emitenteNome: currentObra.emissorNomeDefault || "",
-          emitenteConsolidado: "",
-          emitenteHash: "",
-          gerenciadoraNome: currentObra.fiscalGerenciadoraNomeDefault || "",
-          gerenciadoraConsolidado: "",
-          gerenciadoraHash: "",
-          contratanteNome: currentObra.fiscalAprovadorNomeDefault || "",
-          contratanteAprovado: "",
-          contratanteHash: "",
-          createdAt: undefined,
-          updatedAt: undefined
-        };
-      }
-    }
-
-    // Default template from Current Obra
     if (currentObra) {
       const totalPeriodDays = Number(currentObra.prazoContratual || 0) + Number(currentObra.aditivoPrazo || 0);
       const calculatedEnd = calculateEndDate(currentObra.dataInicio, currentObra.prazoContratual, currentObra.aditivoPrazo);
@@ -970,13 +951,13 @@ export const RdoProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         comentariosGerenciadora: [],
         emitenteNome: currentObra.emissorNomeDefault || "",
         emitenteConsolidado: "",
-        emitenteHash: "ff2b2060a7b8e8ae496a9553579effac",
+        emitenteHash: "",
         gerenciadoraNome: currentObra.fiscalGerenciadoraNomeDefault || "",
         gerenciadoraConsolidado: "",
         gerenciadoraHash: "",
         contratanteNome: currentObra.fiscalAprovadorNomeDefault || "",
         contratanteAprovado: "",
-        contratanteHash: "29381edd9b0233ff2655f9571859320a"
+        contratanteHash: ""
       };
     }
 
