@@ -579,17 +579,17 @@ const SingleReportPrint: React.FC<{ report: RdoReport }> = ({ report }) => {
             <span className="text-[8px] font-bold text-[#004899] uppercase block mb-1.5">
               Fotos Anexas da Atividade ({activityImages.length}):
             </span>
-            <div className="grid grid-cols-2 gap-2.5">
+            <div className="grid grid-cols-2 gap-2">
               {activityImages.map((imgUrl, imgIdx) => (
-                <div key={imgIdx} className="border border-gray-300 rounded p-1.5 bg-white shadow-2xs flex flex-col items-center">
-                  <div className="w-full h-52 flex items-center justify-center bg-gray-50 rounded border border-gray-200 overflow-hidden">
+                <div key={imgIdx} className="border border-gray-300 rounded p-1 bg-white shadow-2xs flex flex-col items-center">
+                  <div className="w-full h-36 max-h-36 flex items-center justify-center bg-gray-50 rounded border border-gray-200 overflow-hidden">
                     <img
                       src={imgUrl}
                       alt={`Foto ${imgIdx + 1} - Atividade ${idx + 1}`}
-                      className="max-h-52 max-w-full object-contain"
+                      className="max-h-36 max-w-full object-contain"
                     />
                   </div>
-                  <span className="text-[7.5px] font-bold text-gray-700 mt-1 uppercase">
+                  <span className="text-[7px] font-bold text-gray-700 mt-0.5 uppercase">
                     Foto {imgIdx + 1} de {activityImages.length}
                   </span>
                 </div>
@@ -601,6 +601,13 @@ const SingleReportPrint: React.FC<{ report: RdoReport }> = ({ report }) => {
     );
   };
 
+  // Helper to chunk an array
+  function chunkArray<T>(arr: T[], size: number): T[][] {
+    return Array.from({ length: Math.ceil(arr.length / size) }, (_, i) =>
+      arr.slice(i * size, i * size + size)
+    );
+  }
+
   // BUILD DYNAMIC PAGES ARRAY FOR PERFECT PDF GENERATION
   const pages: React.ReactNode[] = [];
 
@@ -609,11 +616,13 @@ const SingleReportPrint: React.FC<{ report: RdoReport }> = ({ report }) => {
   let firstBatchCount = 0;
   if (allActivities.length > 0) {
     const act0HasImgs = Boolean(allActivities[0]?.imagens && allActivities[0].imagens.length > 0);
-    if (act0HasImgs) {
+    const act0DescLen = (allActivities[0]?.descricao?.length || 0) + ((allActivities[0]?.comentario || allActivities[0]?.comentarios)?.length || 0);
+    if (act0HasImgs || act0DescLen > 220) {
       firstBatchCount = 1;
     } else if (allActivities.length > 1) {
       const act1HasImgs = Boolean(allActivities[1]?.imagens && allActivities[1].imagens.length > 0);
-      firstBatchCount = act1HasImgs ? 1 : 2;
+      const act1DescLen = (allActivities[1]?.descricao?.length || 0) + ((allActivities[1]?.comentario || allActivities[1]?.comentarios)?.length || 0);
+      firstBatchCount = (act1HasImgs || act1DescLen > 220) ? 1 : 2;
     } else {
       firstBatchCount = 1;
     }
@@ -759,9 +768,10 @@ const SingleReportPrint: React.FC<{ report: RdoReport }> = ({ report }) => {
 
     remainingActivities.forEach((act) => {
       const hasImgs = Boolean(act.imagens && act.imagens.length > 0);
-      const estimatedHeight = hasImgs ? 320 : 120;
+      const descLen = (act.descricao?.length || 0) + ((act.comentario || act.comentarios)?.length || 0);
+      const estimatedHeight = (hasImgs ? 240 : 90) + (descLen > 200 ? 50 : 0);
 
-      if (currentActChunk.length > 0 && (currentChunkHeight + estimatedHeight > 620)) {
+      if (currentActChunk.length > 0 && (currentChunkHeight + estimatedHeight > 640)) {
         activityChunks.push(currentActChunk);
         currentActChunk = [act];
         currentChunkHeight = estimatedHeight;
@@ -798,25 +808,28 @@ const SingleReportPrint: React.FC<{ report: RdoReport }> = ({ report }) => {
     }
 
     if (report.fatosRelevantes && report.fatosRelevantes.length > 0) {
-      pages.push(
-        <div key="page-fatos-relevantes" className="flex flex-col gap-3 text-[8.5px]">
-          <div>
-            <h4 className="text-[9px] font-bold bg-[#004899] text-white py-0.5 px-2 uppercase tracking-wide">
-              FATOS RELEVANTES — OCORRÊNCIAS EXTRAORDINÁRIAS DO DIA
-            </h4>
-            <div className="mt-1 border border-gray-300 divide-y divide-gray-200 bg-white">
-              {report.fatosRelevantes.map((fato, idx) => (
-                <div key={idx} className="p-1.5 flex gap-1.5 items-start text-[8px] text-gray-800">
-                  <span className="font-bold text-[#004899]">{(idx + 1).toString().padStart(2, "0")}.</span>
-                  <div className="flex-1">
-                    <FormattedText text={fato} />
+      const fatosChunks = chunkArray(report.fatosRelevantes, 10);
+      fatosChunks.forEach((fatosChunk, fIdx) => {
+        pages.push(
+          <div key={`page-fatos-relevantes-${fIdx}`} className="flex flex-col gap-3 text-[8.5px]">
+            <div>
+              <h4 className="text-[9px] font-bold bg-[#004899] text-white py-0.5 px-2 uppercase tracking-wide">
+                FATOS RELEVANTES — OCORRÊNCIAS EXTRAORDINÁRIAS DO DIA {fatosChunks.length > 1 ? `(PARTE ${fIdx + 1} DE ${fatosChunks.length})` : ''}
+              </h4>
+              <div className="mt-1 border border-gray-300 divide-y divide-gray-200 bg-white">
+                {fatosChunk.map((fato, idx) => (
+                  <div key={idx} className="p-1.5 flex gap-1.5 items-start text-[8px] text-gray-800">
+                    <span className="font-bold text-[#004899]">{(fIdx * 10 + idx + 1).toString().padStart(2, "0")}.</span>
+                    <div className="flex-1">
+                      <FormattedText text={fato} />
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
           </div>
-        </div>
-      );
+        );
+      });
     }
   }
 
@@ -1060,13 +1073,6 @@ const SingleReportPrint: React.FC<{ report: RdoReport }> = ({ report }) => {
   const efetivoGroups = report.efetivoDetalhado || [];
   const equipItemsAll = report.equipamentosDetalhado || [];
 
-  // Helper to chunk an array
-  function chunkArray<T>(arr: T[], size: number): T[][] {
-    return Array.from({ length: Math.ceil(arr.length / size) }, (_, i) =>
-      arr.slice(i * size, i * size + size)
-    );
-  }
-
   // 1. Process Efetivo Groups into page blocks
   let hasMergedEquip = false;
 
@@ -1094,7 +1100,7 @@ const SingleReportPrint: React.FC<{ report: RdoReport }> = ({ report }) => {
       const totalA = group.items.reduce((sum, item) => sum + (item.a || 0), 0);
       const totalT = group.items.reduce((sum, item) => sum + (item.t || 0), 0);
 
-      const itemChunks = chunkArray(group.items, 30);
+      const itemChunks = chunkArray(group.items, 18);
       itemChunks.forEach((chk, cIdx) => {
         subGroups.push({
           id: `${group.id}-part-${cIdx}`,
@@ -1112,13 +1118,13 @@ const SingleReportPrint: React.FC<{ report: RdoReport }> = ({ report }) => {
       });
     });
 
-    // Group subGroups into page chunks where total items <= 30 per page
+    // Group subGroups into page chunks where total items <= 18 per page
     const efetivoPageChunks: EfetivoSubGroup[][] = [];
     let currentEfChunk: EfetivoSubGroup[] = [];
     let currentEfItemCount = 0;
 
     subGroups.forEach((sg) => {
-      if (currentEfChunk.length > 0 && (currentEfItemCount + sg.items.length > 30)) {
+      if (currentEfChunk.length > 0 && (currentEfItemCount + sg.items.length > 18)) {
         efetivoPageChunks.push(currentEfChunk);
         currentEfChunk = [sg];
         currentEfItemCount = sg.items.length;
@@ -1383,10 +1389,10 @@ const SingleReportPrint: React.FC<{ report: RdoReport }> = ({ report }) => {
           </div>
 
           {/* Full Page Document Image */}
-          <div className="flex-1 border border-gray-300 rounded p-1.5 flex items-center justify-center bg-white overflow-hidden shadow-2xs min-h-[820px]">
+          <div className="flex-1 border border-gray-300 rounded p-1 flex items-center justify-center bg-white overflow-hidden shadow-2xs min-h-0">
             <img 
               src={anexo.dataUrl} 
-              className="max-w-full max-h-[860px] object-contain mx-auto" 
+              className="max-w-full max-h-[710px] object-contain mx-auto" 
               alt={`Folha ${anexo.pageNumber} do anexo ${anexo.fileName}`} 
             />
           </div>
@@ -1399,18 +1405,21 @@ const SingleReportPrint: React.FC<{ report: RdoReport }> = ({ report }) => {
 
   return (
     <div className="flex flex-col gap-6 print:gap-0 bg-transparent print:bg-white mb-6 print:mb-0">
-      {pages.map((pageContent, idx) => (
-        <div
-          key={idx}
-          className="bg-white border md:border-gray-300 p-4 md:p-8 flex flex-col w-full min-h-[1120px] print-page relative shadow-sm print:shadow-none print:border-none box-sizing:border-box"
-        >
-          <PrintHeader />
-          <div className="mt-2 text-[8.5px] flex flex-col flex-1 pb-28">
-            {pageContent}
+      {pages.map((pageContent, idx) => {
+        const isLast = idx === pages.length - 1;
+        return (
+          <div
+            key={idx}
+            className={`bg-white border md:border-gray-300 p-4 md:p-8 flex flex-col w-full min-h-[1120px] print:min-h-0 print:p-0 print-page ${isLast ? "print-page-last" : ""} relative shadow-sm print:shadow-none print:border-none box-sizing:border-box`}
+          >
+            <PrintHeader />
+            <div className="mt-1 text-[8.5px] flex flex-col flex-1 min-h-0 overflow-hidden">
+              {pageContent}
+            </div>
+            <PrintFooter pageNum={idx + 1} totalPages={totalPages} />
           </div>
-          <PrintFooter pageNum={idx + 1} totalPages={totalPages} />
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 };
