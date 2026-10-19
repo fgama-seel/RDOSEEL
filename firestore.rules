@@ -12,6 +12,9 @@ service cloud.firestore {
 
     match /rdos/{rdoId} {
       allow read, write: if isSignedIn();
+      match /{subcollection=**} {
+        allow read, write: if isSignedIn();
+      }
     }
 
     // REGRA SIMPLIFICADA: Obras (Qualquer usuário logado tem acesso total)

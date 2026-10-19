@@ -9,6 +9,7 @@ import { RainChart } from "./RainChart";
 import { ArrowLeft, Printer, ShieldCheck, FileText, ChevronLeft, ChevronRight } from "lucide-react";
 import { useRdoStore } from "../context/RdoContext";
 import { FormattedText } from "./RichTextarea";
+import { convertPdfToImagePages } from "../utils/pdfUtils";
 
 interface RdoPrintViewProps {
   report?: RdoReport;
@@ -139,6 +140,131 @@ const SingleReportPrint: React.FC<{ report: RdoReport }> = ({ report }) => {
   const displayContratanteNome = report.contratanteAssinado
     ? (report.contratanteNome || currentObra?.fiscalContratanteNomeDefault || "")
     : (currentObra?.fiscalContratanteNomeDefault || report.contratanteNome || "Fiscal da Contratante");
+
+  // Resolve and expand all PDF attachments page-by-page so all sheets are integrated
+  const [resolvedAnexos, setResolvedAnexos] = React.useState<Array<{
+    id: string;
+    dataUrl: string;
+    name: string;
+    fileName: string;
+    pageNumber: number;
+    totalPages: number;
+    isPdf: boolean;
+  }>>(() => {
+    return (report.anexos || []).map((a, i) => ({
+      id: a.id || `anx-${i}`,
+      dataUrl: a.dataUrl,
+      name: a.name || `Anexo #${i + 1}`,
+      fileName: a.fileName || a.name || `Anexo #${i + 1}`,
+      pageNumber: a.pageNumber || 1,
+      totalPages: a.totalPages || 1,
+      isPdf: Boolean(a.isPdfPage || a.type === "application/pdf" || a.name?.toLowerCase().endsWith(".pdf"))
+    }));
+  });
+
+  React.useEffect(() => {
+    let isMounted = true;
+    async function expandPdfAnexos() {
+      const raw = report.anexos || [];
+      if (raw.length === 0) {
+        setResolvedAnexos([]);
+        return;
+      }
+
+      // Check if any is a raw PDF (data:application/pdf) that needs expansion
+      const hasRawPdf = raw.some(a => 
+        (a.type === "application/pdf" || a.name?.toLowerCase().endsWith(".pdf")) && 
+        a.dataUrl && 
+        a.dataUrl.startsWith("data:application/pdf")
+      );
+
+      if (!hasRawPdf) {
+        setResolvedAnexos(raw.map((a, i) => ({
+          id: a.id || `anx-${i}`,
+          dataUrl: a.dataUrl,
+          name: a.name || `Anexo #${i + 1}`,
+          fileName: a.fileName || a.name || `Anexo #${i + 1}`,
+          pageNumber: a.pageNumber || 1,
+          totalPages: a.totalPages || 1,
+          isPdf: Boolean(a.isPdfPage || a.type === "application/pdf" || a.name?.toLowerCase().endsWith(".pdf"))
+        })));
+        return;
+      }
+
+      const output: Array<{
+        id: string;
+        dataUrl: string;
+        name: string;
+        fileName: string;
+        pageNumber: number;
+        totalPages: number;
+        isPdf: boolean;
+      }> = [];
+
+      for (let i = 0; i < raw.length; i++) {
+        const a = raw[i];
+        const isRawPdf = a.dataUrl && a.dataUrl.startsWith("data:application/pdf");
+        if (isRawPdf) {
+          try {
+            const pages = await convertPdfToImagePages(a.dataUrl, a.fileName || a.name || `documento_${i + 1}.pdf`);
+            if (pages.length > 0) {
+              for (const p of pages) {
+                output.push({
+                  id: `${a.id}-p${p.pageNumber}`,
+                  dataUrl: p.dataUrl,
+                  name: `${p.fileName} (Folha ${p.pageNumber}/${p.totalPages})`,
+                  fileName: p.fileName,
+                  pageNumber: p.pageNumber,
+                  totalPages: p.totalPages,
+                  isPdf: true
+                });
+              }
+            } else {
+              output.push({
+                id: a.id,
+                dataUrl: a.dataUrl,
+                name: a.name || `Anexo #${i + 1}`,
+                fileName: a.fileName || a.name || `Anexo #${i + 1}`,
+                pageNumber: 1,
+                totalPages: 1,
+                isPdf: true
+              });
+            }
+          } catch (err) {
+            console.error("Error expanding raw PDF in print view:", err);
+            output.push({
+              id: a.id,
+              dataUrl: a.dataUrl,
+              name: a.name || `Anexo #${i + 1}`,
+              fileName: a.fileName || a.name || `Anexo #${i + 1}`,
+              pageNumber: 1,
+              totalPages: 1,
+              isPdf: true
+            });
+          }
+        } else {
+          output.push({
+            id: a.id,
+            dataUrl: a.dataUrl,
+            name: a.name || `Anexo #${i + 1}`,
+            fileName: a.fileName || a.name || `Anexo #${i + 1}`,
+            pageNumber: a.pageNumber || 1,
+            totalPages: a.totalPages || 1,
+            isPdf: Boolean(a.isPdfPage || a.type === "application/pdf" || a.name?.toLowerCase().endsWith(".pdf"))
+          });
+        }
+      }
+
+      if (isMounted) {
+        setResolvedAnexos(output);
+      }
+    }
+
+    expandPdfAnexos();
+    return () => {
+      isMounted = false;
+    };
+  }, [report.anexos]);
 
   // Build Daily Monthly Rain Data
   const [monthlyRainLabels, monthlyRainValues] = React.useMemo(() => {
@@ -1223,42 +1349,50 @@ const SingleReportPrint: React.FC<{ report: RdoReport }> = ({ report }) => {
     );
   }
 
-  // PAGES FOR ANEXOS DOCUMENTAIS
-  if (report.anexos && report.anexos.length > 0) {
-    const numPages = Math.ceil(report.anexos.length / 2);
-    for (let pageIdx = 0; pageIdx < numPages; pageIdx++) {
-      const sliceAnexos = report.anexos.slice(pageIdx * 2, pageIdx * 2 + 2);
+  // PAGES FOR ANEXOS DOCUMENTAIS - INTEGRATED IN THEIR TOTALITY AT THE END OF THE RDO
+  if (resolvedAnexos && resolvedAnexos.length > 0) {
+    resolvedAnexos.forEach((anexo, idx) => {
       pages.push(
-        <div key={`anexo-page-${pageIdx}`} className="flex flex-col gap-3.5 text-[8.5px]">
-          <h4 className="text-[9px] font-bold bg-[#004899] text-white py-0.5 px-2 uppercase tracking-wide">
-            ANEXOS DOCUMENTAIS - PARTE {pageIdx + 1}
-          </h4>
+        <div key={`anexo-page-${anexo.id}-${idx}`} className="flex flex-col gap-2.5 text-[8.5px] flex-1">
+          {/* Executive Header Banner */}
+          <div className="bg-[#004899] text-white py-1 px-3 flex items-center justify-between shadow-xs">
+            <div className="flex items-center gap-2 overflow-hidden">
+              <span className="font-extrabold text-[9.5px] tracking-wider uppercase font-sans shrink-0">
+                ANEXO DOCUMENTAL {anexo.isPdf ? "(PDF INTEGRAL)" : "(IMAGEM)"}
+              </span>
+              <span className="text-white/60 text-[9px] shrink-0">•</span>
+              <span className="text-[9px] font-semibold text-white/95 truncate font-sans">
+                {anexo.fileName}
+              </span>
+            </div>
+            <div className="flex items-center gap-1 font-mono text-[9px] font-bold bg-white/20 px-2 py-0.5 rounded shrink-0">
+              <span>FOLHA</span>
+              <span className="text-amber-300 font-extrabold">{anexo.pageNumber}</span>
+              <span>/</span>
+              <span>{anexo.totalPages}</span>
+            </div>
+          </div>
 
-          <div className="flex-1 flex flex-col gap-4">
-            {sliceAnexos.map((anexo, idx) => {
-              const isPdf = anexo.type === "application/pdf" || (anexo.dataUrl && anexo.dataUrl.startsWith("data:application/pdf"));
-              return (
-                <div key={idx} className="flex-1 border border-gray-300 rounded p-1 flex flex-col items-center justify-center bg-gray-50 overflow-hidden relative">
-                  {isPdf ? (
-                    <div className="flex flex-col items-center justify-center text-center p-6 max-w-sm">
-                      <FileText className="w-12 h-12 text-red-600 mb-2" />
-                      <h5 className="text-[10px] font-bold text-gray-800 uppercase tracking-wide font-sans">{anexo.name || "Documento PDF Anexo"}</h5>
-                      <p className="text-[7px] text-gray-400 mt-1 uppercase font-mono">Tipo: Documento Digital PDF</p>
-                      <div className="w-16 border-b border-gray-200 my-2"></div>
-                      <p className="text-[8px] text-gray-400 leading-relaxed font-sans">
-                        O arquivo digital correspondente a este anexo foi consolidado com sucesso e faz parte integrante deste RDO eletrônico.
-                      </p>
-                    </div>
-                  ) : (
-                    <img src={anexo.dataUrl} className="max-w-full max-h-[440px] object-contain" alt="Anexo documental do relatório" />
-                  )}
-                </div>
-              );
-            })}
+          <div className="bg-slate-50 border border-slate-200 px-2.5 py-1 flex items-center justify-between text-[7.5px] text-slate-600">
+            <span>
+              <strong>Arquivo anexado:</strong> {anexo.fileName} {anexo.totalPages > 1 ? `(Folha ${anexo.pageNumber} de ${anexo.totalPages})` : ""}
+            </span>
+            <span className="italic font-sans">
+              Anexo documental oficial integrado ao {report.rdoNo || "Relatório Diário de Obra"}
+            </span>
+          </div>
+
+          {/* Full Page Document Image */}
+          <div className="flex-1 border border-gray-300 rounded p-1.5 flex items-center justify-center bg-white overflow-hidden shadow-2xs min-h-[820px]">
+            <img 
+              src={anexo.dataUrl} 
+              className="max-w-full max-h-[860px] object-contain mx-auto" 
+              alt={`Folha ${anexo.pageNumber} do anexo ${anexo.fileName}`} 
+            />
           </div>
         </div>
       );
-    }
+    });
   }
 
   const totalPages = pages.length;

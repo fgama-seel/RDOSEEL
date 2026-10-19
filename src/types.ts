@@ -128,7 +128,18 @@ export interface RdoReport {
   data: string; // YYYY-MM-DD
   obra: string;
   obraId?: string; // Links to the ObraConfig
-  anexos?: { id: string, dataUrl: string, name?: string, type?: string }[]; // base64 images or PDFs
+  anexos?: { 
+    id: string; 
+    dataUrl: string; 
+    name?: string; 
+    type?: string; 
+    fileName?: string;
+    pageNumber?: number;
+    totalPages?: number;
+    isPdfPage?: boolean;
+  }[]; // base64 images or PDFs
+  hasSubcollectionAnexos?: boolean;
+  anexosCount?: number;
   status?: "Em Digitação" | "Enviado para Fiscalização" | "Finalizado" | "Assinado" | "Cancelado" | string;
   creatorEmail?: string;
   cliente: string;

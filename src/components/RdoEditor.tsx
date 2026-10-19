@@ -16,6 +16,7 @@ import {
   HOURS_LIST
 } from "../types";
 import { compressImage } from "../utils/imageUtils";
+import { convertPdfToImagePages } from "../utils/pdfUtils";
 import { useRdoStore } from "../context/RdoContext";
 import { RichTextarea } from "./RichTextarea";
 import { 
@@ -42,7 +43,8 @@ import {
   LockOpen,
   AlertCircle,
   Check,
-  AlertTriangle
+  AlertTriangle,
+  Loader2
 } from "lucide-react";
 
 interface RdoEditorProps {
@@ -271,6 +273,26 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
   const displayContratanteNome = currentReport.contratanteAssinado
     ? (currentReport.contratanteNome || associatedObra?.fiscalAprovadorNomeDefault || "")
     : (associatedObra?.fiscalAprovadorNomeDefault || currentReport.contratanteNome || "");
+
+  const [isUploadingAnexos, setIsUploadingAnexos] = useState(false);
+  const [uploadProgressText, setUploadProgressText] = useState("");
+
+  const handleAddFatoRelevante = () => {
+    const list = [...(currentReport.fatosRelevantes || [])];
+    list.push("");
+    updateReport({ fatosRelevantes: list });
+  };
+
+  const handleUpdateFatoRelevante = (index: number, val: string) => {
+    const list = [...(currentReport.fatosRelevantes || [])];
+    list[index] = val;
+    updateReport({ fatosRelevantes: list });
+  };
+
+  const handleRemoveFatoRelevante = (index: number) => {
+    const list = (currentReport.fatosRelevantes || []).filter((_, i) => i !== index);
+    updateReport({ fatosRelevantes: list });
+  };
 
   const handleSave = async () => {
     if (hasDuplicateDate) {
@@ -727,7 +749,7 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
           reader.onloadend = () => resolve(reader.result as string);
           reader.readAsDataURL(file);
         });
-        const compressedBase64 = await compressImage(base64String, 1024, 1024, 0.7);
+        const compressedBase64 = await compressImage(base64String, 900, 900, 0.65);
         newImages.push(compressedBase64);
       }
       if (newImages.length > 0) {
@@ -762,7 +784,7 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
             reader.onloadend = () => resolve(reader.result as string);
             reader.readAsDataURL(file);
           });
-          const compressedBase64 = await compressImage(base64String, 1024, 1024, 0.7);
+          const compressedBase64 = await compressImage(base64String, 900, 900, 0.65);
           newImages.push(compressedBase64);
         }
         const currentImgs = currentReport.atividades[actIdx].imagens || [];
@@ -1530,16 +1552,86 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
         {/* ================== TAB: PARALISAÇÕES & CLIMA ================== */}
         {activeTab === "paralisacoes" && (
           <fieldset disabled={isReadOnly || currentReport.status === "Finalizado" || isAnalista} className="space-y-5 animate-fade-in">
-            <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider border-b border-slate-200 pb-1.5">Fatos Relevantes e Eventos de Obra</h3>
-            <div>
-              <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-tight mb-1">Anotações Extraordinárias (Um evento completo por linha)</label>
-              <textarea
-                value={(currentReport.fatosRelevantes || []).join("\n")}
-                onChange={(e) => updateReport({ fatosRelevantes: e.target.value.split("\n").filter(line => line.trim() !== "") })}
-                rows={3}
-                className="block w-full rounded border-slate-300 shadow-xs focus:border-amber-500 focus:ring-1 focus:ring-amber-500 text-xs text-slate-800 bg-slate-50/20"
-                placeholder="Insira as observações mais importantes do diário. Ex: Atraso mecânico no início do turno..."
-              />
+            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 pb-2.5">
+                <div>
+                  <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider font-sans flex items-center gap-1.5">
+                    <Sparkles className="w-4 h-4 text-amber-500" />
+                    Anotações Extraordinárias &amp; Fatos Relevantes
+                  </h3>
+                  <p className="text-[11px] text-slate-500 mt-0.5 font-sans">
+                    Notas explicativas, justificativas, marcos e ocorrências extraordinárias da obra. Adicione quantos fatos forem necessários.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleAddFatoRelevante}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-slate-900 rounded-lg text-xs font-bold transition-all shadow-xs cursor-pointer active:scale-95 shrink-0"
+                  title="Adicionar novo fato relevante (+)"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Adicionar Fato Relevante</span>
+                </button>
+              </div>
+
+              {/* Lista de Fatos Relevantes */}
+              {(!currentReport.fatosRelevantes || currentReport.fatosRelevantes.length === 0) ? (
+                <div className="border border-dashed border-slate-200 rounded-xl p-6 text-center bg-slate-50/50 flex flex-col items-center justify-center space-y-2">
+                  <p className="text-xs text-slate-500 font-medium font-sans">
+                    Nenhuma anotação extraordinária ou fato relevante inserido neste RDO.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleAddFatoRelevante}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 rounded-lg text-xs font-bold transition-colors shadow-2xs cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5 text-amber-600" />
+                    Inserir Primeiro Fato Relevante
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {currentReport.fatosRelevantes.map((fato, idx) => (
+                    <div 
+                      key={idx} 
+                      className="p-3.5 bg-slate-50/70 rounded-xl border border-slate-200/90 shadow-2xs space-y-2 relative group transition-all focus-within:bg-white focus-within:border-amber-400"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-amber-900 bg-amber-100/80 px-2 py-0.5 rounded font-mono">
+                          Fato Relevante #{String(idx + 1).padStart(2, "0")}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveFatoRelevante(idx)}
+                          className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors cursor-pointer"
+                          title="Excluir este fato relevante"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+
+                      <RichTextarea
+                        label={`Notas Explicativas, Justificativas e Ocorrências #${idx + 1}`}
+                        value={fato}
+                        onChange={(val) => handleUpdateFatoRelevante(idx, val)}
+                        placeholder={`Descreva detalhadamente o fato relevante #${idx + 1} (justificativas, ocorrências extraordinárias, comunicações à fiscalização)...`}
+                        rows={3}
+                      />
+                    </div>
+                  ))}
+
+                  <div className="flex justify-end pt-1">
+                    <button
+                      type="button"
+                      onClick={handleAddFatoRelevante}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-bold transition-colors cursor-pointer font-sans"
+                    >
+                      <Plus className="w-3.5 h-3.5 text-amber-600" />
+                      Adicionar Outro Fato Relevante
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider border-b border-slate-200 pb-1.5 pt-2">Registro de Horas por Tipo de Paralisação</h3>
@@ -2345,86 +2437,228 @@ export const RdoEditor: React.FC<RdoEditorProps> = ({ onShowPrint }) => {
         {activeTab === "anexos" && (
           <div className="space-y-6">
             <fieldset disabled={isReadOnly || currentReport.status === "Finalizado" || isAnalista} className="space-y-4">
-              <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider border-b border-slate-200 pb-1.5 font-sans">Anexos Documentais</h3>
-            <p className="text-[11px] text-slate-500 mb-2 font-sans">Insira imagens (fotos, projetos, recibos) ou arquivos PDF para serem anexados como páginas complementares no documento impresso/PDF do RDO.</p>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 pb-2">
+                <div>
+                  <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider font-sans">Anexos Documentais &amp; Páginas Complementares</h3>
+                  <p className="text-[11px] text-slate-500 mt-0.5 font-sans">
+                    Insira documentos PDF (laudos, certificados, relatórios, projetos) ou imagens. Todas as páginas serão integradas na totalidade no final do RDO.
+                  </p>
+                </div>
+                {(currentReport.anexos || []).length > 0 && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] font-mono font-bold bg-amber-100 text-amber-900 px-2.5 py-1 rounded-full border border-amber-200">
+                      Total: {(currentReport.anexos || []).length} {(currentReport.anexos || []).length === 1 ? "folha / anexo" : "folhas / anexos"}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (window.confirm("Deseja remover todos os anexos deste diário?")) {
+                          updateReport({ anexos: [] });
+                        }
+                      }}
+                      className="text-[10px] text-red-600 hover:text-red-800 font-bold px-2 py-1 rounded hover:bg-red-50 border border-transparent hover:border-red-200 transition-colors cursor-pointer"
+                    >
+                      Limpar Todos
+                    </button>
+                  </div>
+                )}
+              </div>
             
-            <div className="border border-dashed border-slate-300 rounded-xl p-4 bg-slate-50/50 flex flex-col items-center justify-center text-center space-y-3 relative">
-              <input
-                type="file"
-                multiple
-                accept="image/*,application/pdf"
-                onChange={(e) => {
-                  const files = e.target.files;
-                  if (!files || files.length === 0) return;
-                  
-                  const readers = Array.from(files).map((file: any) => {
-                    return new Promise<{ id: string, dataUrl: string, name?: string, type?: string }>((resolve) => {
-                      const reader = new FileReader();
-                      reader.onloadend = async () => {
-                        const dataUrl = reader.result as string;
-                        const finalDataUrl = await compressImage(dataUrl, 1024, 1024, 0.7);
-                        resolve({ 
-                          id: "anx-" + Math.random().toString(36).substr(2, 9), 
-                          dataUrl: finalDataUrl,
-                          name: file.name,
-                          type: file.type
-                        });
-                      };
-                      reader.readAsDataURL(file);
-                    });
-                  });
-                  
-                  Promise.all(readers).then((newAnexos) => {
-                    updateReport({
-                      anexos: [...(currentReport.anexos || []), ...newAnexos]
-                    });
-                  });
-                }}
-                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-              />
-              <ImageIcon className="w-8 h-8 text-slate-400" />
-              <div>
-                <p className="text-[11px] font-bold text-slate-700 font-sans">Clique ou arraste imagens/PDFs aqui</p>
-                <p className="text-[10px] text-slate-500 mt-1 font-sans">Imagens e arquivos PDF selecionados serão impressos no final do documento</p>
-              </div>
-            </div>
+              <div className="border border-dashed border-slate-300 rounded-xl p-5 bg-slate-50/50 flex flex-col items-center justify-center text-center space-y-3 relative hover:border-amber-400 hover:bg-amber-50/10 transition-colors">
+                <input
+                  type="file"
+                  multiple
+                  accept="image/*,application/pdf"
+                  disabled={isUploadingAnexos}
+                  onChange={async (e) => {
+                    const files = e.target.files;
+                    if (!files || files.length === 0) return;
+                    
+                    setIsUploadingAnexos(true);
+                    setUploadProgressText("Iniciando leitura dos arquivos...");
 
-            {(currentReport.anexos || []).length > 0 && (
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6">
-                {(currentReport.anexos || []).map((anexo) => {
-                  const isPdf = anexo.type === "application/pdf" || (anexo.dataUrl && anexo.dataUrl.startsWith("data:application/pdf"));
-                  return (
-                    <div key={anexo.id} className="relative aspect-square rounded border border-slate-200 bg-white shadow-xs group overflow-hidden flex flex-col items-center justify-center p-2">
-                      {isPdf ? (
-                        <div className="flex flex-col items-center justify-center text-center p-2 h-full w-full bg-red-50/50 rounded">
-                          <FileText className="w-8 h-8 text-red-600 mb-1" />
-                          <span className="text-[9px] text-slate-700 font-medium line-clamp-3 px-1 break-all leading-tight font-sans" title={anexo.name}>
-                            {anexo.name || "Documento PDF"}
-                          </span>
-                          <span className="text-[8px] uppercase tracking-wider text-red-700 bg-red-100 rounded px-1.5 py-0.5 mt-1 font-bold font-mono">
-                            PDF
-                          </span>
-                        </div>
-                      ) : (
-                        <img src={anexo.dataUrl} alt="Anexo" className="w-full h-full object-cover rounded" />
-                      )}
-                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                        <button
-                          onClick={() => {
-                            updateReport({
-                              anexos: (currentReport.anexos || []).filter(a => a.id !== anexo.id)
+                    try {
+                      const newAnexosList: any[] = [];
+                      const fileArray = Array.from(files);
+
+                      for (let fIdx = 0; fIdx < fileArray.length; fIdx++) {
+                        const file = fileArray[fIdx];
+                        const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+
+                        if (isPdf) {
+                          setUploadProgressText(`Processando PDF (${fIdx + 1}/${fileArray.length}): ${file.name}...`);
+                          
+                          const dataUrl = await new Promise<string>((resolve, reject) => {
+                            const reader = new FileReader();
+                            reader.onload = () => resolve(reader.result as string);
+                            reader.onerror = reject;
+                            reader.readAsDataURL(file);
+                          });
+
+                          try {
+                            setUploadProgressText(`Renderizando páginas de ${file.name}...`);
+                            const renderedPages = await convertPdfToImagePages(dataUrl, file.name);
+                            if (renderedPages.length > 0) {
+                              for (const p of renderedPages) {
+                                newAnexosList.push({
+                                  id: "anx-" + Math.random().toString(36).substring(2, 9),
+                                  dataUrl: p.dataUrl,
+                                  name: `${file.name} (Folha ${p.pageNumber}/${p.totalPages})`,
+                                  fileName: file.name,
+                                  pageNumber: p.pageNumber,
+                                  totalPages: p.totalPages,
+                                  type: "application/pdf",
+                                  isPdfPage: true
+                                });
+                              }
+                            } else {
+                              newAnexosList.push({
+                                id: "anx-" + Math.random().toString(36).substring(2, 9),
+                                dataUrl,
+                                name: file.name,
+                                fileName: file.name,
+                                type: "application/pdf"
+                              });
+                            }
+                          } catch (errPdf) {
+                            console.warn("Could not extract PDF pages with canvas, fallback to raw PDF:", errPdf);
+                            newAnexosList.push({
+                              id: "anx-" + Math.random().toString(36).substring(2, 9),
+                              dataUrl,
+                              name: file.name,
+                              fileName: file.name,
+                              type: "application/pdf"
                             });
-                          }}
-                          className="bg-red-600 text-white p-2 rounded-full hover:bg-red-700 shadow shadow-black/50 cursor-pointer"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
+                          }
+                        } else {
+                          setUploadProgressText(`Otimizando imagem (${fIdx + 1}/${fileArray.length}): ${file.name}...`);
+                          const dataUrl = await new Promise<string>((resolve, reject) => {
+                            const reader = new FileReader();
+                            reader.onload = () => resolve(reader.result as string);
+                            reader.onerror = reject;
+                            reader.readAsDataURL(file);
+                          });
+                          const finalDataUrl = await compressImage(dataUrl, 1024, 1200, 0.65);
+                          newAnexosList.push({
+                            id: "anx-" + Math.random().toString(36).substring(2, 9),
+                            dataUrl: finalDataUrl,
+                            name: file.name,
+                            fileName: file.name,
+                            type: file.type || "image/jpeg"
+                          });
+                        }
+                      }
+
+                      updateReport({
+                        anexos: [...(currentReport.anexos || []), ...newAnexosList]
+                      });
+                    } catch (err) {
+                      console.error("Error processing attachments:", err);
+                    } finally {
+                      setIsUploadingAnexos(false);
+                      setUploadProgressText("");
+                      e.target.value = "";
+                    }
+                  }}
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed"
+                />
+
+                {isUploadingAnexos ? (
+                  <div className="flex flex-col items-center justify-center py-4 space-y-2 animate-pulse">
+                    <Loader2 className="w-8 h-8 text-amber-500 animate-spin" />
+                    <p className="text-xs font-bold text-slate-700 font-sans">{uploadProgressText || "Processando e integrando páginas..."}</p>
+                    <p className="text-[10px] text-slate-400">Convertendo páginas em alta resolução para inclusão integral no RDO</p>
+                  </div>
+                ) : (
+                  <>
+                    <div className="w-12 h-12 rounded-full bg-amber-50 border border-amber-200 flex items-center justify-center text-amber-600">
+                      <Upload className="w-6 h-6" />
                     </div>
-                  );
-                })}
+                    <div>
+                      <p className="text-xs font-bold text-slate-700 font-sans">Clique ou arraste imagens e arquivos PDF aqui</p>
+                      <p className="text-[10px] text-slate-500 mt-1 font-sans max-w-md mx-auto">
+                        Arquivos PDF com 1, 4 ou mais folhas serão divididos e inseridos folha por folha na totalidade no final do RDO com o nome do arquivo.
+                      </p>
+                    </div>
+                  </>
+                )}
               </div>
-            )}
+
+              {(currentReport.anexos || []).length > 0 && (
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3.5 mt-4">
+                  {(currentReport.anexos || []).map((anexo, idx) => {
+                    const isPdf = anexo.type === "application/pdf" || anexo.isPdfPage || (anexo.dataUrl && anexo.dataUrl.startsWith("data:application/pdf"));
+                    const isImagePreviewAvailable = anexo.dataUrl && anexo.dataUrl.startsWith("data:image");
+
+                    return (
+                      <div 
+                        key={anexo.id || idx} 
+                        className="relative rounded-xl border border-slate-200 bg-white shadow-xs group overflow-hidden flex flex-col justify-between p-2 hover:border-amber-300 transition-all"
+                      >
+                        {/* Preview */}
+                        <div className="relative aspect-[3/4] w-full bg-slate-100 rounded-lg overflow-hidden flex items-center justify-center border border-slate-100">
+                          {isImagePreviewAvailable ? (
+                            <img src={anexo.dataUrl} alt={anexo.name} className="w-full h-full object-contain bg-white" />
+                          ) : isPdf ? (
+                            <div className="flex flex-col items-center justify-center text-center p-2 h-full w-full bg-red-50/60">
+                              <FileText className="w-8 h-8 text-red-600 mb-1" />
+                              <span className="text-[9px] uppercase tracking-wider text-red-700 bg-red-100 rounded px-1.5 py-0.5 font-bold font-mono">
+                                PDF DIGITAL
+                              </span>
+                            </div>
+                          ) : (
+                            <img src={anexo.dataUrl} alt="Anexo" className="w-full h-full object-cover" />
+                          )}
+
+                          {/* Badge de Folha / Formato */}
+                          <div className="absolute top-1.5 left-1.5 flex flex-col gap-1">
+                            {isPdf && (
+                              <span className="bg-red-600 text-white text-[9px] font-bold px-1.5 py-0.5 rounded shadow-xs font-mono">
+                                {anexo.totalPages && anexo.pageNumber 
+                                  ? `PDF • Fl. ${anexo.pageNumber}/${anexo.totalPages}`
+                                  : "PDF"}
+                              </span>
+                            )}
+                            {!isPdf && (
+                              <span className="bg-slate-700 text-white text-[9px] font-bold px-1.5 py-0.5 rounded shadow-xs font-mono">
+                                IMAGEM
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Hover Overlay Delete */}
+                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                updateReport({
+                                  anexos: (currentReport.anexos || []).filter(a => a.id !== anexo.id)
+                                });
+                              }}
+                              className="bg-red-600 text-white p-2 rounded-full hover:bg-red-700 shadow-md cursor-pointer transition-transform active:scale-95"
+                              title="Remover esta página do anexo"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Title and Filename */}
+                        <div className="mt-2 text-left">
+                          <p className="text-[10px] font-bold text-slate-800 line-clamp-1 font-sans" title={anexo.fileName || anexo.name}>
+                            {anexo.fileName || anexo.name || "Documento Anexo"}
+                          </p>
+                          <p className="text-[9px] text-slate-400 font-mono">
+                            {anexo.pageNumber && anexo.totalPages 
+                              ? `Folha ${anexo.pageNumber} de ${anexo.totalPages}` 
+                              : `Anexo #${idx + 1}`}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </fieldset>
           </div>
         )}

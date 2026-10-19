@@ -35,6 +35,7 @@ import {
 import { 
   collection, 
   getDocs, 
+  getDoc,
   doc, 
   setDoc, 
   addDoc, 
@@ -43,6 +44,11 @@ import {
   where, 
   orderBy 
 } from "firebase/firestore";
+import { 
+  optimizeReportMedia, 
+  prepareReportForFirestore, 
+  estimateReportSize 
+} from "../utils/reportOptimizer";
 
 interface RdoContextType {
   user: User | { uid: string; email: string } | null;
@@ -414,6 +420,44 @@ export const RdoProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             } as RdoReport);
           });
           
+          // Auto-heal: Check if there are local reports (such as rdo-parylav0u) that failed to sync due to size limit
+          const rawLocal = localStorage.getItem(LOCAL_REPORTS_KEY);
+          if (rawLocal) {
+            try {
+              const localList = JSON.parse(rawLocal) as RdoReport[];
+              for (const locR of localList) {
+                if (locR.id && !allLoaded.some(r => r.id === locR.id)) {
+                  // This report was saved in LocalStorage but couldn't sync to Firestore
+                  try {
+                    const optLoc = await optimizeReportMedia(locR);
+                    const { mainDoc, subcollectionMedia } = prepareReportForFirestore(optLoc);
+                    await setDoc(doc(db, path, locR.id), JSON.parse(JSON.stringify(mainDoc)));
+                    if (subcollectionMedia) {
+                      await setDoc(doc(db, path, locR.id, "media", "anexos_data"), JSON.parse(JSON.stringify(subcollectionMedia)));
+                    }
+                    allLoaded.push(optLoc);
+                  } catch (eSync) {
+                    console.warn("Could not sync local unsaved report to Firestore:", locR.id, eSync);
+                  }
+                }
+              }
+            } catch {}
+          }
+
+          // Hydrate subcollection anexos if any report has offloaded media
+          for (const rep of allLoaded) {
+            if (rep.hasSubcollectionAnexos && (!rep.anexos || rep.anexos.length === 0)) {
+              try {
+                const mediaSnap = await getDoc(doc(db, path, rep.id!, "media", "anexos_data"));
+                if (mediaSnap.exists()) {
+                  rep.anexos = mediaSnap.data()?.anexos || [];
+                }
+              } catch (eMedia) {
+                console.warn("Could not load subcollection media for report:", rep.id, eMedia);
+              }
+            }
+          }
+
           let filtered = allLoaded.filter(r => 
             r.obraId === currentObra.id || 
             r.obra === currentObra.nome || 
@@ -599,37 +643,53 @@ export const RdoProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const isNewReport = !report.id || !reports.some(r => r.id === report.id);
 
+    // 1. Optimize media if large (compresses base64 images so reports never exceed 1MB)
+    let optimizedReport = reportToSave;
+    try {
+      optimizedReport = await optimizeReportMedia(reportToSave);
+    } catch (eOpt) {
+      console.warn("Could not optimize report media:", eOpt);
+    }
+
     // Always update local cache array safely
     let localUpdatedList: RdoReport[] = [];
-    if (!reportToSave.id) {
-      reportToSave.id = "rdo-" + Math.random().toString(36).substr(2, 9);
-      reportToSave.createdAt = new Date().toISOString();
+    if (!optimizedReport.id) {
+      optimizedReport.id = "rdo-" + Math.random().toString(36).substr(2, 9);
+      optimizedReport.createdAt = new Date().toISOString();
     }
 
     if (isNewReport) {
-      localUpdatedList = [reportToSave, ...reports.filter(r => r.id !== reportToSave.id)];
+      localUpdatedList = [optimizedReport, ...reports.filter(r => r.id !== optimizedReport.id)];
     } else {
-      localUpdatedList = reports.map(r => r.id === reportToSave.id ? reportToSave : r);
+      localUpdatedList = reports.map(r => r.id === optimizedReport.id ? optimizedReport : r);
     }
     safeSetLocalStorage(LOCAL_REPORTS_KEY, localUpdatedList);
 
     if (activeIsFirebase && db) {
       const path = "rdos";
       try {
-        const cleanedReport = JSON.parse(JSON.stringify(reportToSave));
+        const { mainDoc, subcollectionMedia } = prepareReportForFirestore(optimizedReport);
+        const cleanedReport = JSON.parse(JSON.stringify(mainDoc));
         const docRef = doc(db, path, cleanedReport.id);
         await setDoc(docRef, cleanedReport);
+
+        // If attachments were offloaded to subcollection, store them in media subcollection
+        if (subcollectionMedia) {
+          const mediaDocRef = doc(db, path, cleanedReport.id, "media", "anexos_data");
+          await setDoc(mediaDocRef, JSON.parse(JSON.stringify(subcollectionMedia)));
+        }
+
         setReports(prev => {
-          const exists = prev.some(r => r.id === cleanedReport.id);
+          const exists = prev.some(r => r.id === optimizedReport.id);
           if (exists) {
-            return prev.map(r => r.id === cleanedReport.id ? cleanedReport : r);
+            return prev.map(r => r.id === optimizedReport.id ? optimizedReport : r);
           } else {
-            return [cleanedReport, ...prev];
+            return [optimizedReport, ...prev];
           }
         });
-        setCurrentReport(reportToSave);
-        if (reportToSave.id) {
-          safeSetLocalStorage("rdo_current_report_id", reportToSave.id);
+        setCurrentReport(optimizedReport);
+        if (optimizedReport.id) {
+          safeSetLocalStorage("rdo_current_report_id", optimizedReport.id);
         }
         await logAction(logActionType, logMessage);
       } catch (error: any) {
@@ -639,17 +699,17 @@ export const RdoProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           setFirebaseError("O limite de operações do Firebase foi atingido. Seu RDO foi salvo com sucesso no armazenamento local do navegador.");
         }
         setReports(localUpdatedList);
-        setCurrentReport(reportToSave);
-        if (reportToSave.id) {
-          safeSetLocalStorage("rdo_current_report_id", reportToSave.id);
+        setCurrentReport(optimizedReport);
+        if (optimizedReport.id) {
+          safeSetLocalStorage("rdo_current_report_id", optimizedReport.id);
         }
       }
     } else {
       // Local Save
       setReports(localUpdatedList);
-      setCurrentReport(reportToSave);
-      if (reportToSave.id) {
-        safeSetLocalStorage("rdo_current_report_id", reportToSave.id);
+      setCurrentReport(optimizedReport);
+      if (optimizedReport.id) {
+        safeSetLocalStorage("rdo_current_report_id", optimizedReport.id);
       }
     }
   };
@@ -669,6 +729,9 @@ export const RdoProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const path = `rdos/${id}`;
       try {
         await deleteDoc(doc(db, "rdos", id));
+        try {
+          await deleteDoc(doc(db, "rdos", id, "media", "anexos_data"));
+        } catch {}
         setReports(prev => prev.filter(r => r.id !== id));
         if (currentReport?.id === id) {
           const remaining = reports.filter(r => r.id !== id);
@@ -1178,8 +1241,14 @@ export const RdoProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         try {
           for (const repToSave of reportsToUpdateBatch) {
             if (repToSave.id) {
+              const optRep = await optimizeReportMedia(repToSave);
+              const { mainDoc, subcollectionMedia } = prepareReportForFirestore(optRep);
               const docRef = doc(db, "rdos", repToSave.id);
-              await setDoc(docRef, JSON.parse(JSON.stringify(repToSave)));
+              await setDoc(docRef, JSON.parse(JSON.stringify(mainDoc)));
+              if (subcollectionMedia) {
+                const mediaDocRef = doc(db, "rdos", repToSave.id, "media", "anexos_data");
+                await setDoc(mediaDocRef, JSON.parse(JSON.stringify(subcollectionMedia)));
+              }
             }
           }
         } catch (err) {
